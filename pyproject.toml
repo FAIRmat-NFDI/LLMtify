@@ -12,6 +12,14 @@ dependencies = [
     "ase>=3.29.0",
     "numpy>=2.5.4",
     "rdkit>=2026.9.1",
+    "slices>=2.0.12",
+    "xtal2txt @ git+https://github.com/lamalab-org/xtal2txt.git@c6cf9593596ce99f054f1ebbdc4346d7dbec99fb",
+
+]
+
+[tool.uv]
+exclude-dependencies = [
+    "keras",
 ]
 
 [tool.setuptools.packages.find]
