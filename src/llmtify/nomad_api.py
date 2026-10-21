@@ -79,17 +79,22 @@ def fetch_archives():
         payload = {
             'query': query,
             'required': required_data,
-            'pagination': {'page_size': 5},
+            'pagination': {'page_size': 50},
         }
         response = client.post('/entries/archive/query', payload)
         time.sleep(1)  # avoid overwhelming the server with back-to-back requests
         for archive_entry in response.get('data', []):
+            # atoms_ref = None
+            # for topology in archive_entry.get('results', {}).get('material', {}).get('topology', []):
+            #     if topology.get('system_relation',{}).get('type') == 'root':
+            #         atoms_ref = topology.get('atoms_ref')
+            # if atoms_ref:
             if save_dir:
                 os.makedirs(f'{save_dir}/archives', exist_ok=True)
                 entry_id = archive_entry.get('entry_id')
                 if entry_id:
                     with open(
-                        f'{save_dir}/archives/archive_{entry_id}.json', 'w'
+                        f'{save_dir}/archives/archive_{entry_id}.archive.json', 'w'
                     ) as f:
                         import json
                         json.dump(archive_entry, f, indent=2)
