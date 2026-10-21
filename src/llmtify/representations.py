@@ -8,12 +8,13 @@ import numpy as np
 import ase
 from nomad.units import ureg
 import os
+
 def get_atoms(data):
     atoms_dict={}
     functional_type=data['results']['material'].get('functional_type',None)
     for i in data['results']['material']['topology']:
         metadata={'functional_type':functional_type}
-        for k in ['label','building_block','structural_type','method','paretn_system','child_systems']:
+        for k in ['label','building_block','structural_type','method','parent_system','child_systems']:
             try:
                 metadata[k]=i[k]
             except:
@@ -65,6 +66,7 @@ def atoms_dict_to_cifs(atoms_dict,output_dir):
         write(cif_file_path, atoms, format='cif')
         cif_files[system_id] = cif_file_path
     return cif_files
+
 def get_text_representations(cif_file):
     """
     Get text representations for all CIF files in the specified directory.
@@ -96,3 +98,31 @@ def get_text_representations(cif_file):
     text_representations[cif_file] = requested_text_reps
 
     return text_representations
+
+import copy
+
+def build_tree(atoms_dict):
+    # work on a copy so the input isn't mutated
+    nodes = copy.deepcopy(atoms_dict)
+
+    # pass 1: every node gets an empty 'childs' dict
+    for data in nodes.values():
+        data['metadata']['childs'] = {}
+
+    # pass 2: attach each node to its parent (or collect as root)
+    roots = {}
+    for sid, data in nodes.items():
+        parent = data['metadata']['parent_system']
+        if parent is None:
+            roots[sid] = data
+        else:
+            nodes[parent]['metadata']['childs'][sid] = data
+
+    # leaves get childs = None, as you wanted
+    for data in nodes.values():
+        md = data['metadata']
+        if not md['childs']:
+            md['childs'] = None
+        md['child_systems'] = None  # optional: drop the old flat list
+
+    return roots
