@@ -11,6 +11,9 @@ requires-python = ">=3.12"
 dependencies = [
     "nomad-lab>=1.3.17",
     "rdkit>=2026.9.1",
+    "biopython>=1.88",
+    "gemmi>=0.7.5",
+    "nomad-lab>=1.3.17",
     "slices>=2.0.12",
     "xtal2txt @ git+https://github.com/lamalab-org/xtal2txt.git@c6cf9593596ce99f054f1ebbdc4346d7dbec99fb",
 ]

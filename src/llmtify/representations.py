@@ -1,6 +1,5 @@
 from glob import glob
-from xtal2txt.core import TextRep
-from pymatgen.core import Structure
+
 import json
 from ase.io import write
 from nomad.datamodel.metainfo.system import Atoms
@@ -8,12 +7,13 @@ import numpy as np
 import ase
 from nomad.units import ureg
 import os
+import io
 def get_atoms(data):
     atoms_dict={}
     functional_type=data['results']['material'].get('functional_type',None)
     for i in data['results']['material']['topology']:
         metadata={'functional_type':functional_type}
-        for k in ['label','building_block','structural_type','method','paretn_system','child_systems']:
+        for k in ['label','building_block','structural_type','method','parent_system','child_systems']:
             try:
                 metadata[k]=i[k]
             except:
@@ -65,6 +65,34 @@ def atoms_dict_to_cifs(atoms_dict,output_dir):
         write(cif_file_path, atoms, format='cif')
         cif_files[system_id] = cif_file_path
     return cif_files
+
+def atoms_to_cif_string(atoms):
+    cif_string = ''
+    with io.BytesIO() as fd:
+        ase.io.write(fd, atoms, format='cif')
+        cif_string = fd.getvalue().decode()
+    return cif_string
+
+def cif_string_to_atoms(cif_string):
+    atoms = ase.io.read(io.StringIO(cif_string), format='cif')
+    return atoms
+
+def get_cif_string(input_dict, system_id):
+    """
+    Get the CIF representation of a specific system from the atoms dictionary.
+
+    Parameters:
+    atoms_dict (dict): A dictionary where keys are system IDs and values are dictionaries containing 'atoms' and 'metadata'.
+    system_id (str): The system ID for which to retrieve the CIF representation.
+
+    Returns:
+    str: The CIF representation of the specified system.
+    """
+    if system_id not in input_dict['cifs']:
+        return "System ID not found in atoms dictionary."
+    
+    return input_dict['cifs'][system_id]
+
 def get_text_representations(cif_file):
     """
     Get text representations for all CIF files in the specified directory.
@@ -75,6 +103,8 @@ def get_text_representations(cif_file):
     Returns:
     dict: A dictionary where keys are CIF file names and values are dictionaries of text representations.
     """
+    from xtal2txt.core import TextRep
+    from pymatgen.core import Structure
     text_representations = {}
     
     structure = Structure.from_file(c, "cif")
@@ -96,3 +126,41 @@ def get_text_representations(cif_file):
     text_representations[cif_file] = requested_text_reps
 
     return text_representations
+
+
+def build_tree(atoms_dict):
+    # work on a copy so the input isn't mutated
+    nodes = copy.deepcopy(atoms_dict)
+
+    # pass 1: every node gets an empty 'childs' dict
+    for data in nodes.values():
+        data['metadata']['childs'] = {}
+
+    # pass 2: attach each node to its parent (or collect as root)
+    roots = {}
+    for sid, data in nodes.items():
+        parent = data['metadata']['parent_system']
+        if parent is None:
+            roots[sid] = data
+        else:
+            nodes[parent]['metadata']['childs'][sid] = data
+
+    # leaves get childs = None, as you wanted
+    for data in nodes.values():
+        md = data['metadata']
+        if not md['childs']:
+            md['childs'] = None
+        md['child_systems'] = None  # optional: drop the old flat list
+
+    return roots
+
+
+def create_input(archive):
+    atoms_dict = get_atoms(archive)
+    cifs = {}
+    for k, v in atoms_dict.items():
+        cifs[f'{k}'] = atoms_to_cif_string(v['atoms'])
+        v.pop('atoms')  # remove the Atoms object to save space
+    atoms_dict = {'systems': atoms_dict, 'cifs': cifs}
+    return atoms_dict
+
