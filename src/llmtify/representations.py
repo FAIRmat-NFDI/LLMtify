@@ -7,7 +7,7 @@ from nomad.datamodel.metainfo.system import Atoms
 import numpy as np
 import ase
 from nomad.units import ureg
-
+import os
 def get_atoms(data):
     atoms_dict={}
     functional_type=data['results']['material'].get('functional_type',None)
@@ -45,6 +45,26 @@ def get_atoms(data):
             atoms=Atoms.m_from_dict(atoms).to_ase()
         atoms_dict[i['system_id']]={'atoms':atoms,'metadata':metadata}
     return atoms_dict
+
+def atoms_dict_to_cifs(atoms_dict,output_dir):
+    """
+    Convert a dictionary of atoms to CIF files.
+
+    Parameters:
+    atoms_dict (dict): A dictionary where keys are system IDs and values are dictionaries containing 'atoms' and 'metadata'.
+
+    Returns:
+    dict: A dictionary where keys are system IDs and values are the corresponding CIF file paths.
+    """
+    cif_files = {}
+    os.makedirs(output_dir, exist_ok=True)
+    for system_id, data in atoms_dict.items():
+        fname=system_id.replace('/','--')
+        atoms = data['atoms']
+        cif_file_path = f"{output_dir}/{fname}.cif"
+        write(cif_file_path, atoms, format='cif')
+        cif_files[system_id] = cif_file_path
+    return cif_files
 def get_text_representations(cif_file):
     """
     Get text representations for all CIF files in the specified directory.
