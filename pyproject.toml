@@ -7,9 +7,15 @@ name = "LLMtify"
 version = "0.1.0"
 description = "LLM agentic framework for identifying subsystems in complex materials"
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = []
-
+requires-python = "==3.12.13"
+dependencies = [
+    "slices>=2.0.12",
+    "xtal2txt @ git+https://github.com/lamalab-org/xtal2txt.git@c6cf9593596ce99f054f1ebbdc4346d7dbec99fb",
+]
+[tool.uv]
+exclude-dependencies = [
+    "keras",
+]
 [tool.setuptools.packages.find]
 where = ["src"]
 exclude = ["tests*", "docs*"]
