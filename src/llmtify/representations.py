@@ -1,6 +1,5 @@
 from glob import glob
-from xtal2txt.core import TextRep
-from pymatgen.core import Structure
+
 import json
 from ase.io import write
 from nomad.datamodel.metainfo.system import Atoms
@@ -8,7 +7,7 @@ import numpy as np
 import ase
 from nomad.units import ureg
 import os
-
+import io
 def get_atoms(data):
     atoms_dict={}
     functional_type=data['results']['material'].get('functional_type',None)
@@ -67,6 +66,16 @@ def atoms_dict_to_cifs(atoms_dict,output_dir):
         cif_files[system_id] = cif_file_path
     return cif_files
 
+def atoms_to_cif_string(atoms):
+    cif_string = ''
+    with io.BytesIO() as fd:
+        ase.io.write(fd, atoms, format='cif')
+        cif_string = fd.getvalue().decode()
+    return cif_string
+
+def cif_string_to_atoms(cif_string):
+    atoms = ase.io.read(io.StringIO(cif_string), format='cif')
+    return atoms
 def get_text_representations(cif_file):
     """
     Get text representations for all CIF files in the specified directory.
@@ -77,6 +86,8 @@ def get_text_representations(cif_file):
     Returns:
     dict: A dictionary where keys are CIF file names and values are dictionaries of text representations.
     """
+    from xtal2txt.core import TextRep
+    from pymatgen.core import Structure
     text_representations = {}
     
     structure = Structure.from_file(c, "cif")
@@ -99,7 +110,6 @@ def get_text_representations(cif_file):
 
     return text_representations
 
-import copy
 
 def build_tree(atoms_dict):
     # work on a copy so the input isn't mutated
@@ -126,3 +136,14 @@ def build_tree(atoms_dict):
         md['child_systems'] = None  # optional: drop the old flat list
 
     return roots
+
+
+def create_input(archive):
+    atoms_dict = get_atoms(archive)
+    cifs = {}
+    for k, v in atoms_dict.items():
+        cifs[f'{k}.cif'] = atoms_to_cif_string(v['atoms'])
+        v.pop('atoms')  # remove the Atoms object to save space
+    atoms_dict = {'systems': atoms_dict, 'cifs': cifs}
+    return atoms_dict
+
