@@ -1,0 +1,21 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[options]
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P3D"
+
+[options.exclude-newer-package]
+perla-extract = false
+msglc = false
+nomad-gui = false
+nomad-ml-workflows = false
+nomad-lab = false
+nomad-qr-codes = false
+perovskite-solar-cell-database = false
+
+[[package]]
+name = "llmtify"
+version = "0.1.0"
+source = { editable = "." }

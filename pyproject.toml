@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "LLMtify"
+version = "0.1.0"
+description = "LLM agentic framework for identifying subsystems in complex materials"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests*", "docs*"]
