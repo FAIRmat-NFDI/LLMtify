@@ -1,0 +1,26 @@
+# Agent specs. Every agent is the same `Agent` object type; only the spec differs.
+#   model:              profile from models.yaml (per-agent model choice)
+#   context_providers:  keys registered in hackframe.context.providers
+#   tools:              local function tools registered in hackframe.tools
+#   mcp:                server keys from mcp.yaml
+#   skills:             true -> attach SkillsProvider over HACKFRAME_SKILLS_DIR
+agents:
+  exA:
+    description: Analyst agent on the larger model
+    model: mini
+    instructions: |
+      You are a scientific analyst. Answer the task concisely and factually.
+    context_providers: [session_info, domain_notes]
+    tools: [utc_now, pubchem_lookup]
+    mcp: [hello_local]
+    skills: true
+
+  exB:
+    description: Critic agent on the small model
+    model: nano
+    instructions: |
+      You are a critical reviewer. Point out gaps, risks and assumptions in the task.
+    context_providers: [session_info]
+    tools: []
+    mcp: []
+    skills: false

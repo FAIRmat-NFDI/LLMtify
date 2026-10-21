@@ -1,0 +1,47 @@
+services:
+  # OpenTelemetry sink + UI for traces / metrics / logs
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:latest
+    ports:
+      - "18888:18888"   # dashboard UI
+      - "4317:18889"    # OTLP gRPC ingest
+    environment:
+      - DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true
+
+  # Database for the LiteLLM admin UI (keys, spend, logs)
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=litellm
+      - POSTGRES_DB=litellm
+    volumes:
+      - litellm-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One OpenAI-compatible endpoint in front of every model provider
+  # API: http://localhost:4000/v1   UI: http://localhost:4000/ui
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./config/litellm.config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    env_file: .env
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_API_KEY}
+      - DATABASE_URL=postgresql://litellm:litellm@postgres:5432/litellm
+      - STORE_MODEL_IN_DB=True
+      - UI_USERNAME=admin
+      - UI_PASSWORD=${LITELLM_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  litellm-db:
