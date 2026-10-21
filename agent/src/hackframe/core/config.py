@@ -119,7 +119,16 @@ class FrameworkConfig(BaseModel):
 
     @classmethod
     def load(cls, config_dir: Path) -> "FrameworkConfig":
+        config_dir = Path(config_dir).resolve()
+        for required in ("models.yaml", "agents.yaml", "workflows.yaml"):
+            if not (config_dir / required).exists():
+                raise FileNotFoundError(
+                    f"{config_dir / required} not found. Run from the project root or set "
+                    f"HACKFRAME_CONFIG_DIR in .env (current: {config_dir})"
+                )
         agents = load_yaml(config_dir / "agents.yaml").get("agents", {}) or {}
+        if not agents:
+            raise ValueError(f"{config_dir / 'agents.yaml'} has no `agents:` entries (check indentation)")
         mcp = load_yaml(config_dir / "mcp.yaml").get("mcp_servers", {}) or {}
         wfs = load_yaml(config_dir / "workflows.yaml").get("workflows", {}) or {}
         return cls(
