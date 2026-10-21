@@ -76,6 +76,23 @@ def atoms_to_cif_string(atoms):
 def cif_string_to_atoms(cif_string):
     atoms = ase.io.read(io.StringIO(cif_string), format='cif')
     return atoms
+
+def get_cif_string(input_dict, system_id):
+    """
+    Get the CIF representation of a specific system from the atoms dictionary.
+
+    Parameters:
+    atoms_dict (dict): A dictionary where keys are system IDs and values are dictionaries containing 'atoms' and 'metadata'.
+    system_id (str): The system ID for which to retrieve the CIF representation.
+
+    Returns:
+    str: The CIF representation of the specified system.
+    """
+    if system_id not in input_dict['cifs']:
+        return "System ID not found in atoms dictionary."
+    
+    return input_dict['cifs'][system_id]
+
 def get_text_representations(cif_file):
     """
     Get text representations for all CIF files in the specified directory.
@@ -142,7 +159,7 @@ def create_input(archive):
     atoms_dict = get_atoms(archive)
     cifs = {}
     for k, v in atoms_dict.items():
-        cifs[f'{k}.cif'] = atoms_to_cif_string(v['atoms'])
+        cifs[f'{k}'] = atoms_to_cif_string(v['atoms'])
         v.pop('atoms')  # remove the Atoms object to save space
     atoms_dict = {'systems': atoms_dict, 'cifs': cifs}
     return atoms_dict
