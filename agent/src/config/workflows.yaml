@@ -2,6 +2,12 @@
 # pattern: sequential | fan_out_in | graph   (see README for graph syntax)
 # step.type: registered executor key (hello | agent | <your own>)
 workflows:
+  llm_check:
+    description: Sanity check - is the LLM reachable, does structured output work?
+    pattern: sequential
+    steps:
+      - {id: check, type: exe_llm, profile: hu, structured: true}
+
   agents_fanout:
     description: exA (mini) and exB (nano) in parallel, structured results merged
     pattern: fan_out_in

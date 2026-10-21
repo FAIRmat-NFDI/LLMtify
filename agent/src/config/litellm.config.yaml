@@ -1,0 +1,63 @@
+# LiteLLM proxy routing table.
+# `model_name` = alias the framework uses (config/models.yaml -> profile.model).
+# Swap providers here without touching agent code.
+model_list:
+  # ---------------- HU Berlin (vLLM, OpenAI API; HU network or VPN only) ----------------
+  # Rules: no parallel requests, ~10-15 RPM. Also enforced client-side (models.yaml -> providers.hu).
+  - model_name: hu-llm3                      # chat + vision, reasoning OFF (server default)
+    litellm_params:
+      model: openai/llm3
+      api_base: https://llm3-compute.cms.hu-berlin.de/v1
+      api_key: required-but-not-used
+      rpm: 12
+
+  - model_name: hu-llm3-think                # same model, reasoning ON
+    litellm_params:
+      model: openai/llm3
+      api_base: https://llm3-compute.cms.hu-berlin.de/v1
+      api_key: required-but-not-used
+      rpm: 12
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: true
+
+  - model_name: hu-llm7                      # coding model (FIM-capable)
+    litellm_params:
+      model: openai/llm7
+      api_base: https://llm7-compute.cms.hu-berlin.de/v1
+      api_key: required-but-not-used
+      rpm: 12
+
+  - model_name: hu-llm5                      # embedder (/v1/embeddings)
+    litellm_params:
+      model: openai/llm5
+      api_base: https://llm5-compute.cms.hu-berlin.de/v1
+      api_key: required-but-not-used
+      rpm: 12
+    model_info:
+      mode: embedding
+
+  # Reranker (llm6, https://llm6-compute.cms.hu-berlin.de/v1/rerank) is not routed here;
+  # call it directly when a RAG step needs it.
+
+  # ---------------- OpenAI ----------------
+  - model_name: gpt-5-mini
+    litellm_params:
+      model: openai/gpt-5-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-5-nano
+    litellm_params:
+      model: openai/gpt-5-nano
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Example: Azure OpenAI deployment behind the same alias style
+  # - model_name: azure-gpt-4o-mini
+  #   litellm_params:
+  #     model: azure/<deployment-name>
+  #     api_base: os.environ/AZURE_API_BASE
+  #     api_key: os.environ/AZURE_API_KEY
+  #     api_version: "2024-10-21"
+
+litellm_settings:
+  drop_params: true   # silently drop params a given model does not support

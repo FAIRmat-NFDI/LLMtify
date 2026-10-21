@@ -29,8 +29,12 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 # ---------- models.yaml ----------
 class ProviderSpec(BaseModel, extra="allow"):
+    type: str | None = None  # provider class key; defaults to the provider's name
     base_url: str | None = None
     api_key: str | None = None
+    rpm: int | None = None  # client-side requests/minute cap
+    max_concurrency: int | None = None  # client-side parallel request cap (1 = serial)
+    timeout: float = 300.0
 
 
 class ModelProfile(BaseModel):
