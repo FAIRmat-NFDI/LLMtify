@@ -1,16 +1,39 @@
 # Model profiles. Agents reference a profile by name, never a raw model id.
-# provider: registered ModelProvider key (see src/hackframe/llm/providers.py)
+# providers.<name>.type = provider class (src/hackframe/llm/providers.py); defaults to <name>.
+# rpm / max_concurrency are enforced client-side for every request of that provider.
 providers:
-  litellm:
+  litellm:                       # LiteLLM proxy, OpenAI models (no client-side limits)
     base_url: ${LITELLM_BASE_URL:-http://localhost:4000/v1}
     api_key: ${LITELLM_API_KEY:-sk-hackathon-master-key}
 
-profiles:
-  mini:
-    provider: litellm
-    model: gpt-5-mini
-  nano:
-    provider: litellm
-    model: gpt-5-nano
+  hu:                            # LiteLLM proxy, HU Berlin models (shared service -> be polite)
+    type: litellm
+    base_url: ${LITELLM_BASE_URL:-http://localhost:4000/v1}
+    api_key: ${LITELLM_API_KEY:-sk-hackathon-master-key}
+    rpm: 12
+    max_concurrency: 1
 
-default_profile: mini
+  hu_direct:                     # HU Berlin without LiteLLM (use if Docker can't reach the VPN)
+    type: litellm
+    base_url: https://llm3-compute.cms.hu-berlin.de/v1
+    api_key: required-but-not-used
+    rpm: 12
+    max_concurrency: 1
+
+profiles:
+  # HU Berlin (default)
+  hu:        {provider: hu, model: hu-llm3}
+  hu_think:  {provider: hu, model: hu-llm3-think}
+  hu_code:   {provider: hu, model: hu-llm7}
+  hu_direct: {provider: hu_direct, model: llm3}
+  hu_direct_think:
+    provider: hu_direct
+    model: llm3
+    options:
+      extra_body: {chat_template_kwargs: {enable_thinking: true}}
+
+  # OpenAI via LiteLLM
+  mini: {provider: litellm, model: gpt-5-mini}
+  nano: {provider: litellm, model: gpt-5-nano}
+
+default_profile: hu

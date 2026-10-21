@@ -6,8 +6,8 @@
 #   skills:             true -> attach SkillsProvider over HACKFRAME_SKILLS_DIR
 agents:
   exA:
-    description: Analyst agent on the larger model
-    model: mini
+    description: Analyst agent (HU llm3)
+    model: hu            # alternatives: hu_think | hu_direct | mini
     instructions: |
       You are a scientific analyst. Answer the task concisely and factually.
     context_providers: [session_info, domain_notes]
@@ -16,8 +16,8 @@ agents:
     skills: true
 
   exB:
-    description: Critic agent on the small model
-    model: nano
+    description: Critic agent (HU llm3)
+    model: hu            # alternatives: hu_think | hu_direct | nano
     instructions: |
       You are a critical reviewer. Point out gaps, risks and assumptions in the task.
     context_providers: [session_info]

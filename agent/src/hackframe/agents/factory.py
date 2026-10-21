@@ -55,6 +55,7 @@ class AgentFactory:
 
         agent = Agent(
             client=self.models.client(spec.model),
+            default_options=self.models.default_options(spec.model) or None,
             name=spec.name,
             description=spec.description or None,
             instructions=spec.instructions,
