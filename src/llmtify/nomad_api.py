@@ -98,3 +98,32 @@ def fetch_archives():
                     ) as f:
                         import json
                         json.dump(archive_entry, f, indent=2)
+
+def fetch_by_entry_ids(entry_ids: list[str], save_dir: str = 'test_archives'):
+    """Fetch full archive data (system + calculation sections) for `entry_ids`.
+
+    Requests are batched (`batch_size` entry_ids per request) to keep payload
+    sizes reasonable. Yields one archive dict (as returned in the response
+    `data` list) per entry.
+    """
+    client = NomadClient()
+    batch_size = 50
+    for i in range(0, len(entry_ids), batch_size):
+        batch = entry_ids[i:i + batch_size]
+        payload = {
+            'query': {'entry_id:any': batch},
+            'required': required_data,
+            'pagination': {'page_size': batch_size},
+        }
+        response = client.post('/entries/archive/query', payload)
+        time.sleep(1)  # avoid overwhelming the server with back-to-back requests
+        for archive_entry in response.get('data', []):
+            if save_dir:
+                os.makedirs(f'{save_dir}/archives', exist_ok=True)
+                entry_id = archive_entry.get('entry_id')
+                if entry_id:
+                    with open(
+                        f'{save_dir}/archives/archive_{entry_id}.archive.json', 'w'
+                    ) as f:
+                        import json
+                        json.dump(archive_entry, f, indent=2)
