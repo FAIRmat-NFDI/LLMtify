@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "LLM agentic framework for identifying subsystems in complex materials"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "ase>=3.29.0",
+    "numpy>=2.5.4",
+    "rdkit>=2026.9.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
