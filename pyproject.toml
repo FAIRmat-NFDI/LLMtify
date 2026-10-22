@@ -9,8 +9,7 @@ description = "LLM agentic framework for identifying subsystems in complex mater
 readme = "README.md"
 requires-python = "==3.12.13"
 dependencies = [
-    "ase>=3.29.0",
-    "numpy>=2.5.4",
+    "nomad-lab>=1.3.17",
     "rdkit>=2026.9.1",
     "biopython>=1.88",
     "gemmi>=0.7.5",

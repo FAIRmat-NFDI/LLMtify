@@ -86,3 +86,129 @@ pytest -q
 Notes: skill script execution keeps approval on (load/read are auto-approved). MCP connections are
 opened lazily per agent and closed by `Runtime.open_workflow`. DevUI auth is off by default for local
 use (`DEVUI_AUTH_ENABLED`).
+
+## Example: executor + skill + tools (molecule report)
+
+Goal: SMILES in → PubChem lookup → Lipinski check → structured report.
+
+```
+TaskInput(smiles) ─▶ chem_report (agent: chemist)
+                       ├─ skill:  drug-likeness   (tells the agent the procedure)
+                       ├─ tool:   pubchem_lookup  (existing)
+                       └─ tool:   lipinski_check  (new)
+                     ─▶ MoleculeReport (structured)
+```
+
+**1. Tool** – `src/hackframe/tools/chem.py`
+```python
+from typing import Annotated
+
+from hackframe.tools.builtin import register_tool
+
+
+@register_tool("lipinski_check")
+def lipinski_check(
+    molecular_weight: Annotated[float, "Molecular weight in g/mol"],
+    xlogp: Annotated[float, "XLogP (lipophilicity)"],
+    h_bond_donors: Annotated[int, "Number of H-bond donors"],
+    h_bond_acceptors: Annotated[int, "Number of H-bond acceptors"],
+) -> dict:
+    """Lipinski rule of five: drug-like if at most one rule is violated."""
+    violations = [
+        name
+        for name, failed in {
+            "MW > 500": molecular_weight > 500,
+            "XLogP > 5": xlogp > 5,
+            "HBD > 5": h_bond_donors > 5,
+            "HBA > 10": h_bond_acceptors > 10,
+        }.items()
+        if failed
+    ]
+    return {"violations": violations, "drug_like": len(violations) <= 1}
+```
+Register it in `src/hackframe/tools/__init__.py`:
+```python
+from hackframe.tools import builtin, chem, pubchem  # noqa: F401
+```
+
+**2. Skill** – `skills/drug-likeness/SKILL.md`
+```markdown
+---
+name: drug-likeness
+description: Use when asked whether a molecule (given as SMILES) is drug-like or passes Lipinski's rule of five.
+---
+
+# Drug-likeness assessment
+
+1. Call `pubchem_lookup` with the SMILES (set include_synonyms=true).
+2. If `found` is false, stop and report the error.
+3. Call `lipinski_check` with molecular_weight, xlogp, h_bond_donors, h_bond_acceptors from step 1.
+4. Report: common name, CID, formula, MW, the violations list and a one-line verdict.
+Never guess property values; only use numbers returned by the tools.
+```
+
+**3. Agent** – append to `config/agents.yaml`
+```yaml
+  chemist:
+    description: Molecule profiler (PubChem + Lipinski)
+    model: hu
+    instructions: |
+      You are a cheminformatics assistant. Use tools for every number you report.
+    context_providers: [session_info]
+    tools: [pubchem_lookup, lipinski_check]
+    skills: true
+```
+
+**4. Executor** – `src/hackframe/executors/chem_report.py`
+```python
+from pydantic import BaseModel, Field
+
+from hackframe.core.schemas import StepMessage
+from hackframe.executors.base import EXECUTORS
+from hackframe.executors.llm import AgentStepExecutor
+
+
+class MoleculeReport(BaseModel):
+    name: str | None = Field(None, description="Common name")
+    cid: int | None = None
+    formula: str | None = None
+    molecular_weight: float | None = None
+    lipinski_violations: list[str] = Field(default_factory=list)
+    drug_like: bool | None = None
+    verdict: str = Field(..., description="One-sentence conclusion")
+
+
+@EXECUTORS.register("chem_report")
+class ChemReportExecutor(AgentStepExecutor):
+    executor_type = "chem_report"
+    response_format = MoleculeReport  # structured output schema for this step
+
+    def build_prompt(self, message: StepMessage) -> str:
+        smiles = message.task.params.get("smiles", message.task.task)
+        return f"Use the drug-likeness skill. Assess this molecule: {smiles}"
+```
+Register it in `src/hackframe/executors/__init__.py`:
+```python
+from hackframe.executors import builtin, chem_report, exe_llm, hello, llm  # noqa: F401
+```
+
+**5. Workflow** – append to `config/workflows.yaml`
+```yaml
+  molecule_report:
+    description: SMILES -> PubChem lookup -> Lipinski check -> structured report
+    pattern: sequential
+    steps:
+      - {id: report, type: chem_report, agent: chemist}
+```
+
+**6. Run**
+```bash
+python -m hackframe list        # shows chem_report, lipinski_check, drug-likeness
+python -m hackframe run molecule_report "aspirin" --params '{"smiles": "CC(=O)OC1=CC=CC=C1C(=O)O"}'
+python -m hackframe devui       # or pick molecule_report in DevUI
+```
+DevUI input: `{"task": "aspirin", "params": {"smiles": "CC(=O)OC1=CC=CC=C1C(=O)O"}}`
+
+Who owns what: the **tool** does the computation, the **skill** holds the procedure (editable by
+scientists without code), the **agent** bundles model + tools + skills, the **executor** fixes the
+prompt and output schema for one workflow step.

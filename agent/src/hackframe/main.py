@@ -4,6 +4,7 @@
   python -m hackframe run hello_fanout "say hi"
   python -m hackframe agent exA "what is entropy?"
   python -m hackframe devui
+  python -m hackframe pubchem "CCO"
 """
 
 import argparse
@@ -50,8 +51,18 @@ def cli() -> None:
     d = sub.add_parser("devui", help="launch DevUI")
     d.add_argument("--port", type=int)
 
+    pc = sub.add_parser("pubchem", help="test the PubChem tool directly (no LLM)")
+    pc.add_argument("smiles")
+
     args = p.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+
+    if args.cmd == "pubchem":
+        from hackframe.tools.pubchem import cli_lookup
+
+        asyncio.run(cli_lookup(args.smiles))
+        return
+
     rt = Runtime()
 
     if args.cmd == "list":

@@ -207,8 +207,7 @@ async def pubchem_lookup(
     return result.model_dump_json(exclude_none=True)
 
 
-if __name__ == "__main__":  # python -m hackframe.tools.pubchem "CCO"
-    import sys
-
-    res = asyncio.run(_client.lookup(sys.argv[1] if len(sys.argv) > 1 else "CC(=O)OC1=CC=CC=C1C(=O)O"))
+async def cli_lookup(smiles: str) -> None:
+    """Used by `python -m hackframe pubchem "<SMILES>"`."""
+    res = await _client.lookup(smiles)
     print(json.dumps(res.model_dump(mode="json", exclude_none=True), indent=2))
