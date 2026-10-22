@@ -7,6 +7,7 @@ import numpy as np
 import ase
 from nomad.units import ureg
 import os
+import copy
 import io
 def get_atoms(data):
     atoms_dict={}
