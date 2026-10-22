@@ -67,14 +67,13 @@ class NomadClient:
                     time.sleep(self.backoff_seconds)
         raise last_exc
 
-def fetch_archives():
+def fetch_archives(save_dir=None):
         """Fetch full archive data (system + calculation sections) for `entry_ids`.
 
         Requests are batched (`batch_size` entry_ids per request) to keep payload
         sizes reasonable. Yields one archive dict (as returned in the response
         `data` list) per entry.
         """
-        save_dir = 'test_archives'
         client = NomadClient()
         payload = {
             'query': query,
@@ -83,23 +82,28 @@ def fetch_archives():
         }
         response = client.post('/entries/archive/query', payload)
         time.sleep(1)  # avoid overwhelming the server with back-to-back requests
+        archives = {}
         for archive_entry in response.get('data', []):
             # atoms_ref = None
             # for topology in archive_entry.get('results', {}).get('material', {}).get('topology', []):
             #     if topology.get('system_relation',{}).get('type') == 'root':
             #         atoms_ref = topology.get('atoms_ref')
             # if atoms_ref:
+            entry_id = archive_entry.get('entry_id')
+            if not entry_id:
+                    print("Warning: archive entry missing 'entry_id', skipping save.")
+                    continue
             if save_dir:
                 os.makedirs(f'{save_dir}/archives', exist_ok=True)
-                entry_id = archive_entry.get('entry_id')
-                if entry_id:
-                    with open(
-                        f'{save_dir}/archives/archive_{entry_id}.archive.json', 'w'
-                    ) as f:
-                        import json
-                        json.dump(archive_entry, f, indent=2)
+                with open(
+                    f'{save_dir}/archives/archive_{entry_id}.archive.json', 'w'
+                ) as f:
+                    import json
+                    json.dump(archive_entry['archive'], f, indent=2)
+            archives[entry_id] = archive_entry['archive']
+        return archives
 
-def fetch_by_entry_ids(entry_ids: list[str], save_dir: str = 'test_archives'):
+def fetch_by_entry_ids(entry_ids: list[str], save_dir = None):
     """Fetch full archive data (system + calculation sections) for `entry_ids`.
 
     Requests are batched (`batch_size` entry_ids per request) to keep payload
@@ -117,13 +121,18 @@ def fetch_by_entry_ids(entry_ids: list[str], save_dir: str = 'test_archives'):
         }
         response = client.post('/entries/archive/query', payload)
         time.sleep(1)  # avoid overwhelming the server with back-to-back requests
+        archives = {}
         for archive_entry in response.get('data', []):
+            entry_id = archive_entry.get('entry_id')
+            if not entry_id:
+                print("Warning: archive entry missing 'entry_id', skipping save.")
+                continue
             if save_dir:
                 os.makedirs(f'{save_dir}/archives', exist_ok=True)
-                entry_id = archive_entry.get('entry_id')
-                if entry_id:
-                    with open(
-                        f'{save_dir}/archives/archive_{entry_id}.archive.json', 'w'
-                    ) as f:
-                        import json
-                        json.dump(archive_entry, f, indent=2)
+                with open(
+                    f'{save_dir}/archives/archive_{entry_id}.archive.json', 'w'
+                ) as f:
+                    import json
+                    json.dump(archive_entry['archive'], f, indent=2)
+            archives[entry_id] = archive_entry['archive']
+        return archives
