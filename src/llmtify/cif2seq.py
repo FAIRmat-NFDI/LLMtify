@@ -125,7 +125,7 @@ def custom_cif_to_sequence(cif_file):
     print(f"residues found: {len(res)}, chains: {len(out)}", file=sys.stderr)
     for i,s in enumerate(out): print(f">chain{i+1} len={len(s)}\n{s}")
 
-def cif_to_sequence(cif_string):
+def protein_chain_cif_to_aa_sequence(cif_string):
     from io import StringIO
     from openbabel import pybel
     from Bio import SeqIO
