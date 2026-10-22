@@ -3,7 +3,7 @@ mcp_servers:
   hello_local:
     transport: stdio
     command: python
-    args: ["-m", "hackframe.mcp.servers.hello_server"]
+    args: ["-m", "matgentify.mcp.servers.hello_server"]
     description: Internal demo MCP server (echo, add)
     approval_mode: never_require
     enabled: true

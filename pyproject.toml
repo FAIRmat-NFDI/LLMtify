@@ -1,7 +1,7 @@
 [project]
-name = "hackframe"
+name = "matgentify"
 version = "0.1.0"
-description = "OO agentic framework on Microsoft Agent Framework: config-driven agents, executors, skills, MCP, context providers, LiteLLM, OTel/Aspire, DevUI"
+description = "A scientific AI agent to identify atomic systems"
 requires-python = ">=3.11"
 dependencies = [
     "agent-framework>=1.22.0",
@@ -27,7 +27,7 @@ dependencies = [
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff", "graphviz"]
 
 [project.scripts]
-hackframe = "hackframe.main:cli"
+matgentify = "matgentify.main:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -37,7 +37,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/hackframe"]
+packages = ["src/matgentify"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

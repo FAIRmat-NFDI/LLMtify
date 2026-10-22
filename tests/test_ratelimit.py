@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-from hackframe.llm.ratelimit import RateLimitedTransport
+from matgentify.llm.ratelimit import RateLimitedTransport
 
 
 async def test_max_concurrency_one_serializes_requests() -> None:

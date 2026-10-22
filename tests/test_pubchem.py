@@ -4,9 +4,9 @@ import json
 
 import httpx
 
-import hackframe.tools  # noqa: F401  (package import registers tools)
-from hackframe.tools.builtin import TOOLS as REGISTRY
-from hackframe.tools.pubchem import PubChemClient
+import matgentify.tools  # noqa: F401  (package import registers tools)
+from matgentify.tools.builtin import TOOLS as REGISTRY
+from matgentify.tools.pubchem import PubChemClient
 
 ASPIRIN = "CC(=O)OC1=CC=CC=C1C(=O)O"
 

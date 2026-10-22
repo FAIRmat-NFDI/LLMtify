@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 from ase.io import read
 
-from hackframe.tools import nomad
-from hackframe.tools.structure import cif_to_smiles, read_cell
+from matgentify.tools import nomad
+from matgentify.tools.structure import cif_to_smiles, read_cell
 
 FLAT = json.loads((Path(__file__).parent.parent / "examples" / "material_flat_example.json").read_text())
 ROOT_REF = "#/run/0/system/0/atoms"
@@ -83,8 +83,8 @@ def test_archive_to_material_round_trip() -> None:
 
 async def test_pipeline_from_entry_url(tmp_path: Path, monkeypatch) -> None:
     from tests.test_material_pipeline import install_fakes, llm_down
-    from hackframe.core.runtime import Runtime
-    from hackframe.settings import Settings
+    from matgentify.core.runtime import Runtime
+    from matgentify.settings import Settings
 
     install_fakes(monkeypatch)
     llm_down(monkeypatch)
@@ -104,8 +104,8 @@ async def test_pipeline_from_entry_url(tmp_path: Path, monkeypatch) -> None:
 
 async def test_bare_url_input_and_full_json_still_work(tmp_path: Path, monkeypatch) -> None:
     from tests.test_material_pipeline import install_fakes, llm_down
-    from hackframe.core.runtime import Runtime
-    from hackframe.settings import Settings
+    from matgentify.core.runtime import Runtime
+    from matgentify.settings import Settings
 
     install_fakes(monkeypatch)
     llm_down(monkeypatch)
@@ -118,9 +118,9 @@ async def test_bare_url_input_and_full_json_still_work(tmp_path: Path, monkeypat
 @pytest.mark.parametrize("flag", [False, "false"])
 async def test_metainfo_false_nulls_labels_before_saving(tmp_path: Path, monkeypatch, flag) -> None:
     from tests.test_material_pipeline import install_fakes, llm_down
-    from hackframe.core.material import system_meta
-    from hackframe.core.runtime import Runtime
-    from hackframe.settings import Settings
+    from matgentify.core.material import system_meta
+    from matgentify.core.runtime import Runtime
+    from matgentify.settings import Settings
 
     install_fakes(monkeypatch)
     llm_down(monkeypatch)
@@ -138,8 +138,8 @@ async def test_metainfo_false_nulls_labels_before_saving(tmp_path: Path, monkeyp
 
 async def test_metainfo_true_keeps_labels(tmp_path: Path, monkeypatch) -> None:
     from tests.test_material_pipeline import install_fakes, llm_down
-    from hackframe.core.runtime import Runtime
-    from hackframe.settings import Settings
+    from matgentify.core.runtime import Runtime
+    from matgentify.settings import Settings
 
     install_fakes(monkeypatch)
     llm_down(monkeypatch)

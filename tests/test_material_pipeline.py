@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from hackframe.core.artifacts import ArtifactNotFound, ArtifactStore
-from hackframe.core.runtime import Runtime
-from hackframe.executors.judge import JudgeExecutor, MaterialSummary, SubsystemRow
-from hackframe.executors.tool_finder import SystemPlan, ToolFinderExecutor, ToolPlan
-from hackframe.executors.tools_chem import PubChemMCPExecutor, PubChemSafetyExecutor
-from hackframe.executors.tools_mof_protein import MOFidExecutor
-from hackframe.tools.mofid import MOFid
-from hackframe.settings import Settings
-from hackframe.tools.pubchem import CompoundDetails, PubChemCompound, PubChemResult
+from matgentify.core.artifacts import ArtifactNotFound, ArtifactStore
+from matgentify.core.runtime import Runtime
+from matgentify.executors.judge import JudgeExecutor, MaterialSummary, SubsystemRow
+from matgentify.executors.tool_finder import SystemPlan, ToolFinderExecutor, ToolPlan
+from matgentify.executors.tools_chem import PubChemMCPExecutor, PubChemSafetyExecutor
+from matgentify.executors.tools_mof_protein import MOFidExecutor
+from matgentify.tools.mofid import MOFid
+from matgentify.settings import Settings
+from matgentify.tools.pubchem import CompoundDetails, PubChemCompound, PubChemResult
 
 EXAMPLE_PATH = Path(__file__).parent.parent / "examples" / "material_example.json"
 EXAMPLE = json.loads(EXAMPLE_PATH.read_text())
@@ -197,7 +197,7 @@ async def test_bad_agent_answer_stops_chain_but_judge_runs(rt: Runtime, monkeypa
 
 
 def test_extract_json() -> None:
-    from hackframe.executors.tools_chem import extract_json
+    from matgentify.executors.tools_chem import extract_json
 
     assert extract_json('ok\n```json\n{"compounds": []}\n```') == {"compounds": []}
     assert extract_json('result: {"compounds": [{"a": 1}]} done') == {"compounds": [{"a": 1}]}
@@ -211,7 +211,7 @@ async def test_cif_to_smiles_inherits_root_cell(rt: Runtime, monkeypatch) -> Non
 
 
 def test_normalize_findings_accepts_real_model_shapes() -> None:
-    from hackframe.executors.tools_chem import extract_json, normalize_findings
+    from matgentify.executors.tools_chem import extract_json, normalize_findings
 
     q = [{"query_smiles": "[Ag]", "smiles_without_h": "[Ag]"}]
     # the shape seen live: one bare compound with PubChem-style keys inside a json block
@@ -291,8 +291,8 @@ async def test_llm_rows_fill_gaps_from_template(rt: Runtime, monkeypatch) -> Non
 
 async def test_expected_smiles_identified_by_structure_match(rt: Runtime) -> None:
     """The user's expected SMILES for the organic subsystem -> CID 85631 without any LLM call."""
-    from hackframe.core.schemas import WorkItem
-    from hackframe.tools.structure import _without_h
+    from matgentify.core.schemas import WorkItem
+    from matgentify.tools.structure import _without_h
 
     expected = "[H]C1CNC([H])C([H])C1C([H])([H])C([H])([H])C([H])([H])C1C([H])C([H])NC([H])C1[H]"
     ex = PubChemMCPExecutor("pubchem", agent=rt.agent("pubchem"))
@@ -305,7 +305,7 @@ async def test_expected_smiles_identified_by_structure_match(rt: Runtime) -> Non
 
 
 async def test_mcp_details_failure_keeps_rest_data(rt: Runtime, monkeypatch) -> None:
-    from hackframe.core.schemas import WorkItem
+    from matgentify.core.schemas import WorkItem
 
     async def mcp_down(self, cid):
         raise RuntimeError("MCP server not reachable")

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import httpx
 
-from hackframe.tools.pubchem import PubChemClient
-from hackframe.tools.structure import cif_to_smiles
+from matgentify.tools.pubchem import PubChemClient
+from matgentify.tools.structure import cif_to_smiles
 
 CIFS = json.loads((Path(__file__).parent.parent / "examples" / "material_example.json").read_text())["cifs"]
 
@@ -66,7 +66,7 @@ async def test_details_missing_sections_stay_empty() -> None:
 
 
 def test_parent_cell_joins_fragments_across_boundary() -> None:
-    from hackframe.tools.structure import read_cell
+    from matgentify.tools.structure import read_cell
 
     cell = read_cell(CIFS["results/material/topology/0.cif"])
     assert read_cell(CIFS["results/material/topology/5.cif"]) is None  # Cartesian cut-out, no cell
@@ -78,7 +78,7 @@ def test_parent_cell_joins_fragments_across_boundary() -> None:
 
 
 def test_bond_orders_give_real_molecule() -> None:
-    from hackframe.tools.structure import read_cell
+    from matgentify.tools.structure import read_cell
 
     out = cif_to_smiles(CIFS["results/material/topology/5.cif"], cell=read_cell(CIFS["results/material/topology/0.cif"]))
     (bonded,) = out["bonded_fragments"]

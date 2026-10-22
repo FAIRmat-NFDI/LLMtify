@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from hackframe.core.runtime import Runtime
-from hackframe.executors.judge import JudgeExecutor, MaterialSummary
-from hackframe.executors.tool_finder import SystemPlan, ToolFinderExecutor, ToolPlan
-from hackframe.executors.tools_mof_protein import PDBLookupExecutor
-from hackframe.settings import Settings
-from hackframe.tools import protein as protein_tools
+from matgentify.core.runtime import Runtime
+from matgentify.executors.judge import JudgeExecutor, MaterialSummary
+from matgentify.executors.tool_finder import SystemPlan, ToolFinderExecutor, ToolPlan
+from matgentify.executors.tools_mof_protein import PDBLookupExecutor
+from matgentify.settings import Settings
+from matgentify.tools import protein as protein_tools
 from tests.test_material_pipeline import EXAMPLE, ROOT, install_fakes, llm_down
 
 DATA = Path(__file__).parent / "data"
@@ -58,8 +58,8 @@ def judge_down(monkeypatch) -> None:
 async def test_mof_route_mofid_and_subsystems_run_in_parallel(rt: Runtime, monkeypatch) -> None:
     """LLM says MOF: root -> mofid AND every molecule subsystem -> cif_to_smiles -> pubchem -> pubchem_safety,
     in parallel lanes (the slow MOFid run overlaps the PubChem lookups), then fan-in to the judge."""
-    from hackframe.executors.tools_chem import CifToSmilesExecutor
-    from hackframe.executors.tools_mof_protein import MOFidExecutor
+    from matgentify.executors.tools_chem import CifToSmilesExecutor
+    from matgentify.executors.tools_mof_protein import MOFidExecutor
     from tests.test_material_pipeline import fake_mofid
 
     times: dict[str, float] = {}
@@ -76,7 +76,7 @@ async def test_mof_route_mofid_and_subsystems_run_in_parallel(rt: Runtime, monke
         times.setdefault("smiles_" + item.system, time.perf_counter())
         return await orig(self, item)
 
-    from hackframe.executors.tools_chem import PubChemMCPExecutor
+    from matgentify.executors.tools_chem import PubChemMCPExecutor
     orig_lookup = PubChemMCPExecutor.client.lookup
 
     async def slow_lookup(smiles, *a, **kw):  # PubChem round trip
@@ -131,13 +131,13 @@ async def test_mof_without_metainfo_processes_every_subsystem(rt: Runtime, monke
 
 
 async def test_mof_missing_image_is_reported(rt: Runtime, monkeypatch) -> None:
-    from hackframe.executors.tools_mof_protein import MOFidExecutor
-    from hackframe.tools.mofid import get_mofid
+    from matgentify.executors.tools_mof_protein import MOFidExecutor
+    from matgentify.tools.mofid import get_mofid
 
     llm_down(monkeypatch)
     monkeypatch.setattr(MOFidExecutor, "run_mofid", staticmethod(get_mofid))
-    monkeypatch.setattr("hackframe.tools.mofid.shutil.which", lambda _: "/usr/bin/singularity")
-    monkeypatch.setattr("hackframe.tools.mofid.sif_candidates", lambda: [Path("/nonexistent/mofid.sif")])
+    monkeypatch.setattr("matgentify.tools.mofid.shutil.which", lambda _: "/usr/bin/singularity")
+    monkeypatch.setattr("matgentify.tools.mofid.sif_candidates", lambda: [Path("/nonexistent/mofid.sif")])
     out = await rt.run_workflow("material_pipeline", EXAMPLE)
     assert "mofid.sif not found" in json.dumps(out["errors"])
     assert out["summary"].startswith("The given system is a metal-organic framework (MOF) containing Silver")
@@ -227,7 +227,7 @@ async def test_short_sequence_is_not_sent_to_rcsb(rt: Runtime, monkeypatch) -> N
 
 # ---------------------------------------------------------------- real MOFid (needs singularity + mofid.sif)
 def _sif():
-    from hackframe.tools.mofid import MOFidError, find_sif
+    from matgentify.tools.mofid import MOFidError, find_sif
     try:
         return find_sif()
     except MOFidError:
@@ -236,7 +236,7 @@ def _sif():
 
 @pytest.mark.skipif(not (shutil.which("singularity") and _sif()), reason="singularity / mofid.sif not installed")
 def test_real_mofid_on_example_root() -> None:
-    from hackframe.tools.mofid import get_mofid
+    from matgentify.tools.mofid import get_mofid
 
     key = next(k for k in EXAMPLE["cifs"] if k.startswith(ROOT))
     res = get_mofid(EXAMPLE["cifs"][key])
@@ -302,9 +302,9 @@ async def test_complex_fallback_keeps_ions_out_of_chains(rt: Runtime, monkeypatc
 
 
 def test_ion_and_protonated_ligand_smiles() -> None:
-    from hackframe.core.material import cif_key
-    from hackframe.executors.tools_chem import neutralize
-    from hackframe.tools.structure import cif_to_smiles
+    from matgentify.core.material import cif_key
+    from matgentify.executors.tools_chem import neutralize
+    from matgentify.tools.structure import cif_to_smiles
 
     cif = lambda n: COMPLEX["cifs"][cif_key(T + str(n), COMPLEX["cifs"])]  # noqa: E731
     assert cif_to_smiles(cif(64))["fragments"] == ["[Na]"]                 # not [NaH] (sodium hydride)

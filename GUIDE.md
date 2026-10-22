@@ -1,4 +1,4 @@
-# hackframe – Quick Guide
+# MATgentify – Quick Guide
 
 ## 1. Enable the LLM (OpenAI → LiteLLM → agents)
 
@@ -40,7 +40,7 @@ agents:
 ```bash
 docker compose up -d
 curl -s localhost:4000/v1/models -H "Authorization: Bearer sk-hackathon-master-key"
-python -m hackframe agent exA "hello"
+python -m matgentify agent exA "hello"
 ```
 
 New model = add alias (b) + profile (c) + set `model:` on the agent (d). Restart LiteLLM after editing (b).
@@ -49,11 +49,11 @@ New model = add alias (b) + profile (c) + set `model:` on the agent (d). Restart
 
 ## 2. Create a new executor
 
-**a) Code** – `src/hackframe/executors/my_steps.py`:
+**a) Code** – `src/matgentify/executors/my_steps.py`:
 ```python
 from typing import Any
-from hackframe.core.schemas import StepMessage
-from hackframe.executors.base import EXECUTORS, BaseStepExecutor
+from matgentify.core.schemas import StepMessage
+from matgentify.executors.base import EXECUTORS, BaseStepExecutor
 
 @EXECUTORS.register("normalize")
 class NormalizeExecutor(BaseStepExecutor):
@@ -65,9 +65,9 @@ class NormalizeExecutor(BaseStepExecutor):
         return {"unit": unit, "task": message.task.task.strip().lower(), "seen": len(previous)}
 ```
 
-**b) Register** – add it to the import in `src/hackframe/executors/__init__.py`:
+**b) Register** – add it to the import in `src/matgentify/executors/__init__.py`:
 ```python
-from hackframe.executors import builtin, llm, my_steps, preprocess  # noqa: F401
+from matgentify.executors import builtin, llm, my_steps, preprocess  # noqa: F401
 ```
 
 **c) Use** – in `config/workflows.yaml`:
@@ -84,7 +84,7 @@ LLM step = `type: agent` + `agent: <name>` (no code needed).
 
 Tools and skills attach to **agents**; an executor gets them via `type: agent, agent: <name>`.
 
-**Local tool** – `src/hackframe/tools/builtin.py`:
+**Local tool** – `src/matgentify/tools/builtin.py`:
 ```python
 @register_tool("molar_mass")
 def molar_mass(formula: Annotated[str, "Chemical formula"]) -> float:
@@ -98,12 +98,12 @@ mcp_servers:
   my_local:                       # internal, stdio
     transport: stdio
     command: python
-    args: ["-m", "hackframe.mcp.servers.my_server"]
+    args: ["-m", "matgentify.mcp.servers.my_server"]
   my_remote:                      # external, HTTP
     transport: http
     url: https://example.org/mcp
 ```
-(copy `src/hackframe/mcp/servers/hello_server.py` as a template for `my_server.py`)
+(copy `src/matgentify/mcp/servers/hello_server.py` as a template for `my_server.py`)
 
 **Skill** – folder `skills/<name>/SKILL.md`:
 ```markdown
@@ -174,7 +174,7 @@ Many-to-many is not supported; split it into a fan-in then a fan-out.
 
 **Run**
 ```bash
-python -m hackframe list                         # see workflows + registered executors
-python -m hackframe run my_graph "your task" --params '{"k": "v"}'
-python -m hackframe devui                        # all workflows appear in DevUI
+python -m matgentify list                         # see workflows + registered executors
+python -m matgentify run my_graph "your task" --params '{"k": "v"}'
+python -m matgentify devui                        # all workflows appear in DevUI
 ```

@@ -1,4 +1,6 @@
-# hackframe
+# MATgentify
+
+A scientific AI agent to identify atomic systems.
 
 Config-driven, object-oriented agentic framework on **Microsoft Agent Framework (Python, ≥1.22)**.
 Scientists add skills, MCP servers, context providers, tools and executors; the framework wires
@@ -7,7 +9,7 @@ them into agents and workflows with per-agent model choice, structured I/O, OTel
 ## Layout
 
 ```
-agentic-hackframe/
+MATgentify/
 ├── pyproject.toml
 ├── .env.example
 ├── docker-compose.yml            # Aspire dashboard (OTLP) + LiteLLM proxy
@@ -20,7 +22,7 @@ agentic-hackframe/
 │   └── knowledge/domain_notes.md # scientist-editable context, injected by `domain_notes`
 ├── skills/
 │   └── hello-skill/              # SKILL.md + references/  (Agent Skills format)
-├── src/hackframe/
+├── src/matgentify/
 │   ├── main.py                   # CLI: list | run | agent | devui
 │   ├── settings.py               # env / .env settings
 │   ├── core/
@@ -62,10 +64,10 @@ cp .env.example .env            # add OPENAI_API_KEY (or other provider keys)
 pip install -e ".[dev]"
 docker compose up -d            # Aspire UI: http://localhost:18888 · LiteLLM: :4000
 
-python -m hackframe list                                   # config + registered plugins
-python -m hackframe run agents_fanout "explain entropy"    # exA (gpt-5-mini) ‖ exB (gpt-5-nano)
-python -m hackframe agent exA "what is entropy?"
-python -m hackframe devui                                  # http://localhost:8080
+python -m matgentify list                                   # config + registered plugins
+python -m matgentify run agents_fanout "explain entropy"    # exA (gpt-5-mini) ‖ exB (gpt-5-nano)
+python -m matgentify agent exA "what is entropy?"
+python -m matgentify devui                                  # http://localhost:8080
 pytest -q
 ```
 
@@ -99,11 +101,11 @@ TaskInput(smiles) ─▶ chem_report (agent: chemist)
                      ─▶ MoleculeReport (structured)
 ```
 
-**1. Tool** – `src/hackframe/tools/chem.py`
+**1. Tool** – `src/matgentify/tools/chem.py`
 ```python
 from typing import Annotated
 
-from hackframe.tools.builtin import register_tool
+from matgentify.tools.builtin import register_tool
 
 
 @register_tool("lipinski_check")
@@ -126,9 +128,9 @@ def lipinski_check(
     ]
     return {"violations": violations, "drug_like": len(violations) <= 1}
 ```
-Register it in `src/hackframe/tools/__init__.py`:
+Register it in `src/matgentify/tools/__init__.py`:
 ```python
-from hackframe.tools import builtin, chem, pubchem  # noqa: F401
+from matgentify.tools import builtin, chem, pubchem  # noqa: F401
 ```
 
 **2. Skill** – `skills/drug-likeness/SKILL.md`
@@ -159,13 +161,13 @@ Never guess property values; only use numbers returned by the tools.
     skills: true
 ```
 
-**4. Executor** – `src/hackframe/executors/chem_report.py`
+**4. Executor** – `src/matgentify/executors/chem_report.py`
 ```python
 from pydantic import BaseModel, Field
 
-from hackframe.core.schemas import StepMessage
-from hackframe.executors.base import EXECUTORS
-from hackframe.executors.llm import AgentStepExecutor
+from matgentify.core.schemas import StepMessage
+from matgentify.executors.base import EXECUTORS
+from matgentify.executors.llm import AgentStepExecutor
 
 
 class MoleculeReport(BaseModel):
@@ -187,9 +189,9 @@ class ChemReportExecutor(AgentStepExecutor):
         smiles = message.task.params.get("smiles", message.task.task)
         return f"Use the drug-likeness skill. Assess this molecule: {smiles}"
 ```
-Register it in `src/hackframe/executors/__init__.py`:
+Register it in `src/matgentify/executors/__init__.py`:
 ```python
-from hackframe.executors import builtin, chem_report, llm, preprocess  # noqa: F401
+from matgentify.executors import builtin, chem_report, llm, preprocess  # noqa: F401
 ```
 
 **5. Workflow** – append to `config/workflows.yaml`
@@ -203,9 +205,9 @@ from hackframe.executors import builtin, chem_report, llm, preprocess  # noqa: F
 
 **6. Run**
 ```bash
-python -m hackframe list        # shows chem_report, lipinski_check, drug-likeness
-python -m hackframe run molecule_report "aspirin" --params '{"smiles": "CC(=O)OC1=CC=CC=C1C(=O)O"}'
-python -m hackframe devui       # or pick molecule_report in DevUI
+python -m matgentify list        # shows chem_report, lipinski_check, drug-likeness
+python -m matgentify run molecule_report "aspirin" --params '{"smiles": "CC(=O)OC1=CC=CC=C1C(=O)O"}'
+python -m matgentify devui       # or pick molecule_report in DevUI
 ```
 DevUI input: `{"task": "aspirin", "params": {"smiles": "CC(=O)OC1=CC=CC=C1C(=O)O"}}`
 
@@ -295,7 +297,7 @@ pubchem about 2–4 per molecule subsystem (tool-calling loop).
 Results carry `generated_by: "llm" | "fallback"` (judge) and `scrape.planner.by: "llm" | "fallback"` (tool_finder).
 
 ```bash
-python -m hackframe run material_pipeline --input-file examples/material_example.json
+python -m matgentify run material_pipeline --input-file examples/material_example.json
 ```
 
 ### PubChem MCP server
@@ -327,9 +329,9 @@ CIFs alone (the label-based no-LLM fallback then finds no MOF/protein label).
 The workflow input can be a NOMAD entry instead of the full JSON:
 
 ```bash
-python -m hackframe run material_pipeline --input '{"entry": "https://nomad-lab.eu/prod/v1/gui/search/entries/entry/id/<entry_id>"}'
-python -m hackframe run material_pipeline --input '{"entry": "<entry_id>"}'
-python -m hackframe run material_pipeline --input '{"entry": "<entry_id>", "metainfo": false}'
+python -m matgentify run material_pipeline --input '{"entry": "https://nomad-lab.eu/prod/v1/gui/search/entries/entry/id/<entry_id>"}'
+python -m matgentify run material_pipeline --input '{"entry": "<entry_id>"}'
+python -m matgentify run material_pipeline --input '{"entry": "<entry_id>", "metainfo": false}'
 ```
 DevUI: paste `{"entry": "<url or entry_id>"}` (or just the URL) into the input box. `preprocess` fetches the archive
 (`tools/nomad.py`, NomadClient, `required_data`), converts `results.material.topology` + `run/system/atoms` into
@@ -339,10 +341,10 @@ The full JSON input still works. API base: `NOMAD_BASE_URL` in `.env`.
 ## Workflow graph (MAF WorkflowViz)
 
 ```bash
-python -m hackframe graph material_pipeline                     # Mermaid text (MAF's to_mermaid)
-python -m hackframe graph material_pipeline --format dot        # Graphviz DOT
-python -m hackframe graph material_pipeline --format png        # docs/material_pipeline.png (needs: apt install graphviz)
-python -m hackframe graph material_pipeline --format svg -o x.svg --internal   # incl. intake/finalize
+python -m matgentify graph material_pipeline                     # Mermaid text (MAF's to_mermaid)
+python -m matgentify graph material_pipeline --format dot        # Graphviz DOT
+python -m matgentify graph material_pipeline --format png        # docs/material_pipeline.png (needs: apt install graphviz)
+python -m matgentify graph material_pipeline --format svg -o x.svg --internal   # incl. intake/finalize
 ```
 In code: `WorkflowViz(rt.workflow("material_pipeline")).export(format="svg", filename="graph.svg")`.
 This shows the wiring: every tool can hand off to every other, because routes are chosen at run time.

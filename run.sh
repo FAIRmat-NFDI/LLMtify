@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hackframe launcher
+# MATgentify launcher
 #   ./run.sh          setup + services + DevUI   (default: all)
 #   ./run.sh setup    venv + install + .env
 #   ./run.sh up       docker services (LiteLLM, Postgres, Aspire) + wait until ready
@@ -66,7 +66,7 @@ devui() {
   command -v singularity >/dev/null || warn "singularity missing - MOF route will fail (./run.sh mofid)"
   [ -f external/mofid.sif ] || grep -qs '^MOFID_SIF=/' .env || warn "external/mofid.sif missing - MOF route will fail (./run.sh mofid)"
   say "DevUI  http://localhost:${DEVUI_PORT:-8080}   (Ctrl+C to stop)"
-  python -m hackframe devui
+  python -m matgentify devui
 }
 
 down() {

@@ -2,7 +2,7 @@
 
 import pytest
 
-from hackframe.core.runtime import Runtime
+from matgentify.core.runtime import Runtime
 
 
 @pytest.fixture(scope="module")
@@ -24,7 +24,7 @@ def test_agents_build_with_per_agent_models(rt: Runtime) -> None:
 
 
 def test_hu_provider_is_rate_limited_and_shared(rt: Runtime) -> None:
-    from hackframe.llm.ratelimit import RateLimitedTransport
+    from matgentify.llm.ratelimit import RateLimitedTransport
 
     hu = rt.models.provider("hu")
     oa = hu._openai_client()

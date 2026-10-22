@@ -1,7 +1,7 @@
 # Agent specs. Every agent is the same `Agent` object type; only the spec differs.
 #   model:              profile from models.yaml (per-agent model choice)
-#   context_providers:  keys registered in hackframe.context.providers
-#   tools:              local function tools registered in hackframe.tools
+#   context_providers:  keys registered in matgentify.context.providers
+#   tools:              local function tools registered in matgentify.tools
 #   mcp:                server keys from mcp.yaml
 #   skills:             true -> MAF SkillsProvider (agent loads any skill on demand)
 #   ground_skills:      skill names always in the instructions (domain knowledge the agent must follow)

@@ -1,5 +1,5 @@
 # Model profiles. Agents reference a profile by name, never a raw model id.
-# providers.<name>.type = provider class (src/hackframe/llm/providers.py); defaults to <name>.
+# providers.<name>.type = provider class (src/matgentify/llm/providers.py); defaults to <name>.
 # rpm / max_concurrency are enforced client-side for every request of that provider.
 providers:
   litellm:                       # LiteLLM proxy, OpenAI models (no client-side limits)
