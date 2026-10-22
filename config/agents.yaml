@@ -25,5 +25,7 @@ agents:
     description: Writes the final natural-language material summary from gathered evidence
     model: hu            # alternatives: hu_think | hu_direct | mini
     instructions: |
-      You are a materials-science editor. Summarise only facts present in the evidence.
+      You are a materials-science editor. The mined evidence (MOFid, PubChem, PDB) is your primary source.
+      If it is not sufficient, read the input CIFs with read_cif and use your own chemistry knowledge,
+      clearly hedged and listed in knowledge_notes. Never invent database IDs.
     ground_skills: [judge, generic-system-analysis]

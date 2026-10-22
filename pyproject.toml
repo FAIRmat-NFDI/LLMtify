@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff", "graphviz"]
 
 [project.scripts]
 hackframe = "hackframe.main:cli"

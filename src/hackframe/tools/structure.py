@@ -61,19 +61,27 @@ def _unwrapped_positions(atoms: Atoms, skeleton: Chem.Mol) -> Any:
     return pos
 
 
-def _bond_orders(fragment: Chem.Mol) -> str | None:
-    """Same connectivity, bond orders perceived from 3D geometry (neutral molecule). None if it fails."""
+def _bond_orders(fragment: Chem.Mol, charges: tuple[int, ...] = (0, 1, -1, 2, -2)) -> str | None:
+    """Same connectivity, bond orders perceived from 3D geometry. Tries a neutral molecule first, then
+    small net charges (MD/biomolecular ligands are often protonated, e.g. R3NH+). None if all fail."""
     if fragment.GetNumAtoms() < 2:
-        return Chem.MolToSmiles(fragment)
-    try:
-        mol = Chem.Mol(fragment)
-        for b in mol.GetBonds():
-            b.SetBondType(Chem.BondType.SINGLE)
-        rdDetermineBonds.DetermineBondOrders(mol, charge=0)
-        Chem.RemoveStereochemistry(mol)  # 3D-derived stereo tags would block exact matches
-        return Chem.MolToSmiles(Chem.RemoveHs(mol))
-    except Exception:  # metals, odd valences, radicals ...
-        return None
+        return _single_atom(fragment)
+    for charge in charges:
+        try:
+            mol = Chem.Mol(fragment)
+            for b in mol.GetBonds():
+                b.SetBondType(Chem.BondType.SINGLE)
+            rdDetermineBonds.DetermineBondOrders(mol, charge=charge)
+            Chem.RemoveStereochemistry(mol)  # 3D-derived stereo tags would block exact matches
+            return Chem.MolToSmiles(Chem.RemoveHs(mol))
+        except Exception:  # metals, odd valences, radicals, wrong charge ...
+            continue
+    return None
+
+
+def _single_atom(fragment: Chem.Mol) -> str:
+    """Isolated atom/ion -> '[Na]', '[Zn]' (RDKit would add implicit H: '[NaH]' = sodium hydride)."""
+    return f"[{fragment.GetAtomWithIdx(0).GetSymbol()}]"
 
 
 def cif_to_smiles(
@@ -112,7 +120,7 @@ def cif_to_smiles(
 
     unique: dict[str, tuple[int, str | None]] = {}
     for frag in Chem.GetMolFrags(mol, asMols=True, sanitizeFrags=False):
-        frag_smiles = Chem.MolToSmiles(frag)
+        frag_smiles = _single_atom(frag) if frag.GetNumAtoms() == 1 else Chem.MolToSmiles(frag)
         if frag_smiles in _H_ONLY or frag_smiles in unique:
             continue
         unique[frag_smiles] = (_heavy_atoms(frag), _bond_orders(frag) if bond_orders else None)

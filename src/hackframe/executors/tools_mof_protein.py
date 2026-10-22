@@ -69,13 +69,13 @@ class MOFidExecutor(BaseToolExecutor):
 class CifToSeqExecutor(BaseToolExecutor):
     executor_type = "cif_to_seq"
     description = (
-        "Cif2Seq: protein chain CIF -> amino acid sequence (Open Babel + Biopython, topology-based fallback). "
-        "Use only on protein/peptide chains. Output: sequence, sequences per chain, length."
+        "Cif2Seq: polymer chain CIF -> sequence. Protein: amino acids (Open Babel + Biopython, topology fallback); "
+        "DNA/RNA: nucleotides. Use on protein / nucleic-acid chain subsystems. Output: sequence, polymer, length."
     )
 
     async def run_tool(self, item: WorkItem) -> dict[str, Any]:
         cif = await _cif(self, item)
-        method = "openbabel"
+        method, polymer = "openbabel", "protein"
         seq = ""
         try:
             seq = await asyncio.to_thread(protein_tools.protein_chain_cif_to_aa_sequence, cif)
@@ -85,14 +85,20 @@ class CifToSeqExecutor(BaseToolExecutor):
         if not seq or seq.count("X") > len(seq) / 2:  # no residue info -> rebuild from the bonded topology
             sequences, method = await asyncio.to_thread(protein_tools.cif_to_sequences, cif), "topology"
             seq = max(sequences, key=len, default="")
+        if not seq:  # not a protein: DNA / RNA?
+            seq, polymer = await asyncio.to_thread(protein_tools.nucleic_acid_cif_to_sequence, cif)
+            sequences, method = ([seq] if seq else []), "openbabel-nucleotides"
         if not seq:
-            raise ValueError("no amino acid sequence found (not a protein chain?)")
+            raise ValueError("no amino acid or nucleotide sequence found (not a polymer chain?)")
+        unit = "residues" if polymer == "protein" else "nucleotides"
         return {
             "sequence": seq,
             "sequences": sequences,
+            "sequence_type": polymer,
             "length": len(seq),
             "method": method,
-            "summary": {"length": len(seq), "chains": len(sequences), "sequence": seq if len(seq) <= 60 else seq[:60] + "..."},
+            "summary": {"polymer": polymer, "length": len(seq), "unit": unit, "chains": len(sequences),
+                        "sequence": seq if len(seq) <= 60 else seq[:60] + "..."},
         }
 
 
@@ -111,7 +117,12 @@ class PDBLookupExecutor(BaseToolExecutor):
         if not seq:
             raise ValueError("no amino acid sequence from an earlier tool (plan cif_to_seq before pdb_lookup)")
         cutoff = float(self.params.get("identity_cutoff", 0.9))
-        result = await asyncio.to_thread(self.search, seq, cutoff)
+        seq_type = item.find("sequence_type") or "protein"
+        min_len = int(self.params.get("min_length", 20))
+        if len(seq) < min_len:  # RCSB sequence search (MMseqs2) needs >= 20 residues
+            note = f"{seq_type} sequence of {len(seq)} is too short for the RCSB sequence search (min {min_len})"
+            return {"found": False, "summary": {"found": False, "polymer": seq_type, "note": note}}
+        result = await asyncio.to_thread(self.search, seq, cutoff, seq_type)
         hits = result.get("result_set") or []
         if not hits:
             return {"found": False, "summary": {"found": False, "note": f"no PDB entry with >= {cutoff:.0%} identity"}}

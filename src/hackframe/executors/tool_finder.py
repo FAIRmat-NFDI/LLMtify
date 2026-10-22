@@ -7,7 +7,8 @@ workflows.yaml:
   - {id: tool_finder, type: tool_finder, agent: tool_finder, skill: tool-finder, source: compact}
 
 Strict routes (skill metadata, applied after the class is judged, LLM or fallback):
-  route_mof_tools      (mofid)                  -> root structure only, then judge (no CIF->SMILES / PubChem)
+  route_mof_tools      (mofid)                  -> root structure
+  route_mof_subsystem_tools (cif_to_smiles,pubchem,pubchem_safety) -> every MOF subsystem (in parallel)
   route_protein_tools  (cif_to_seq,pdb_lookup)  -> chain subsystems only, then judge (no CIF->SMILES / PubChem)
 If the LLM call fails, the class comes from labels (fallback_mof_labels, fallback_protein_labels);
 molecular/other: fallback_structural_types / fallback_tools on each molecule subsystem.
@@ -36,13 +37,32 @@ class SystemPlan(BaseModel):
 
 
 class ToolPlan(BaseModel):
-    material_class: str = Field(..., description="mof | protein | molecular | other")
+    material_class: str = Field(
+        ..., description="exactly one of: mof | protein | molecular | other "
+                         "(protein = any biomolecular system: protein / DNA / RNA chains, complexes)")
     class_reason: str = Field(..., description="One sentence: why this class")
     plans: list[SystemPlan]
 
 
 def _csv(value: str | None) -> list[str]:
     return [v.strip() for v in (value or "").split(",") if v.strip()]
+
+
+CLASSES = ("mof", "protein", "molecular", "other")
+
+
+def normalize_class(value: str | None) -> str:
+    """Map free-form LLM answers onto the class set, e.g. 'biomolecular_complex' -> 'protein'."""
+    v = (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if v in CLASSES:
+        return v
+    if "mof" in v or "metal_organic" in v or "framework" in v:
+        return "mof"
+    if any(k in v for k in ("protein", "bio", "peptide", "dna", "rna", "nucleic", "enzyme", "complex")):
+        return "protein"
+    if "molec" in v or "ligand" in v or "organic" in v:
+        return "molecular"
+    return "other"
 
 
 @EXECUTORS.register("tool_finder")
@@ -115,7 +135,8 @@ class ToolFinderExecutor(BaseRouterExecutor):
 
         if any(label(s) in mof_labels for s in systems):
             return ToolPlan(material_class="mof", class_reason="fallback: MOF label", plans=[])
-        protein_systems = [s for s in systems if s["has_cif"] and any(p in label(s) for p in protein_labels)]
+        protein_systems = [s for s in systems if s["has_cif"] and s["structural_type"] != "group"
+                           and any(p in label(s) for p in protein_labels)]
         if protein_systems:
             return ToolPlan(material_class="protein", class_reason="fallback: protein label", plans=[
                 SystemPlan(system=s["system"], tools=["cif_to_seq"], reason="fallback: protein label")
@@ -128,27 +149,70 @@ class ToolFinderExecutor(BaseRouterExecutor):
         return ToolPlan(material_class=material_class, class_reason="fallback rules from skill metadata", plans=plans)
 
     async def enforce_route(self, tool_plan: ToolPlan, systems: list[dict[str, Any]]) -> ToolPlan:
-        """Strict routes per class (skill metadata `route_<class>_tools`): once the class is judged,
-        the class decides the tools, not the per-subsystem plan.
-          mof     -> only the root (periodic) structure, tools route_mof_tools (mofid) -> judge
-          protein -> only the chain subsystems, tools route_protein_tools (cif_to_seq, pdb_lookup) -> judge
+        """Routes per class from the skill metadata, applied once the class is judged (LLM or fallback):
+          mof     -> root structure: route_mof_tools (mofid)
+                     + every subsystem: route_mof_subsystem_tools (cif_to_smiles, pubchem, pubchem_safety)
+          protein -> polymer chains (protein / DNA / RNA): route_protein_tools (cif_to_seq, pdb_lookup)
+                     + every other molecule subsystem (ligands, ions, water): route_protein_subsystem_tools
+        Subsystems are `molecule` subsystems; `group`s are replaced by their molecule children (a group holds
+        all copies). If structural types are unknown (metainfo=false) the LLM's picks decide.
         Other classes keep the LLM's plan."""
         meta = await self.skills.metadata(self.skill) if self.skills else {}
-        cls = (tool_plan.material_class or "").strip().lower()
+        cls = normalize_class(tool_plan.material_class)
         tools = _csv(meta.get(f"route_{cls}_tools"))
         if not tools:
-            return tool_plan
+            return ToolPlan(material_class=cls, class_reason=tool_plan.class_reason, plans=tool_plan.plans)
+        types = set(_csv(meta.get("fallback_structural_types")))
         with_cif = [s for s in systems if s["has_cif"]]
+        by_key = {s["system"]: s for s in with_cif}
         root = next((s for s in with_cif if s["system_relation"] == "root"), None)
+        others = [s for s in with_cif if s is not root]
+        typed = any(s["structural_type"] for s in others)
+        molecules = [s for s in others if s["structural_type"] in types]
+        sub_tools = _csv(meta.get(f"route_{cls}_subsystem_tools"))
+
+        def resolve(keys: list[str]) -> list[dict[str, Any]]:
+            """LLM picks -> subsystems; a group becomes its molecule children."""
+            out: list[dict[str, Any]] = []
+            for k in keys:
+                s = by_key.get(k)
+                if s is None or s is root:
+                    continue
+                if s["structural_type"] == "group":
+                    out += [c for c in molecules if c["parent_system"] == k]
+                else:
+                    out.append(s)
+            return list({s["system"]: s for s in out}.values())
+
+        plans: list[SystemPlan] = []
         if cls == "mof":
-            targets = [root] if root else []
-            reason = "MOF -> MOFid on the periodic root structure"
-        else:  # protein: the chains the LLM pointed at (any plan with tools), else the root
-            planned = {p.system for p in tool_plan.plans if p.tools}
-            targets = [s for s in with_cif if s["system"] in planned] or ([root] if root else with_cif[:1])
-            reason = "protein chain -> sequence -> PDB"
-        return ToolPlan(material_class=cls, class_reason=tool_plan.class_reason,
-                        plans=[SystemPlan(system=t["system"], tools=tools, reason=reason) for t in targets])
+            if root:
+                plans.append(SystemPlan(system=root["system"], tools=tools, reason="MOF -> MOFid on the periodic root structure"))
+            subs = molecules if typed else others
+            chains: list[dict[str, Any]] = []
+        else:  # protein / biomolecular
+            labels = {x.lower() for x in _csv(meta.get("fallback_protein_labels"))}
+            min_atoms = int(meta.get("polymer_min_atoms", 20))
+
+            def polymer_like(s: dict[str, Any]) -> bool:  # e.g. 'Ion_chain_E' (Zn) is not a chain
+                return {"C", "N"} <= set(s.get("elements") or []) and (s.get("n_atoms") or 0) >= min_atoms
+
+            picked = resolve([p.system for p in tool_plan.plans if "cif_to_seq" in p.tools])
+            by_label = [s for s in molecules if any(x in (s["label"] or "").lower() for x in labels)]
+            chains = [s for s in {s["system"]: s for s in picked + by_label}.values() if polymer_like(s)]
+            if not chains and root:
+                chains = [root]
+            plans += [SystemPlan(system=s["system"], tools=tools, reason="polymer chain -> sequence -> PDB") for s in chains]
+            chain_keys = {s["system"] for s in chains}
+            if typed:
+                subs = [s for s in molecules if s["system"] not in chain_keys]
+            else:
+                subs = [s for s in resolve([p.system for p in tool_plan.plans if p.tools and "cif_to_seq" not in p.tools])
+                        if s["system"] not in chain_keys]
+        if sub_tools:
+            plans += [SystemPlan(system=s["system"], tools=sub_tools, reason=f"{cls} subsystem -> SMILES -> PubChem")
+                      for s in subs]
+        return ToolPlan(material_class=cls, class_reason=tool_plan.class_reason, plans=plans)
 
     async def plan(self, message: StepMessage) -> tuple[list[WorkItem], dict[str, Any]]:
         small = message.output_of(self.source)

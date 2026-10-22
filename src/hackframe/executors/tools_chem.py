@@ -140,6 +140,21 @@ def normalize_findings(value: Any, queries: list[dict[str, str]]) -> PubChemFind
     return PubChemFindings(compounds=hits)
 
 
+def neutralize(smiles: str | None) -> str | None:
+    """'C[NH+]1CCCC1' -> 'CN1CCCC1' (RDKit Uncharger); None if unchanged or unparsable."""
+    if not smiles or ("+" not in smiles and "-" not in smiles):
+        return None
+    try:
+        from rdkit import Chem
+        from rdkit.Chem.MolStandardize import rdMolStandardize
+
+        mol = Chem.MolFromSmiles(smiles)
+        out = Chem.MolToSmiles(rdMolStandardize.Uncharger().uncharge(mol)) if mol else None
+        return out if out and out != smiles else None
+    except Exception:
+        return None
+
+
 @EXECUTORS.register("pubchem_mcp")
 class PubChemMCPExecutor(BaseToolExecutor):
     """SMILES -> PubChem compound, per fragment:
@@ -199,8 +214,10 @@ class PubChemMCPExecutor(BaseToolExecutor):
         1. bond-order SMILES (aromatic rings, nitriles ... exact for any molecule)
         2. converter SMILES without H (PubChem fills implicit H: exact for saturated molecules,
            e.g. C(CC1CCNCC1)CC1CCNCC1 -> CID 85631)
-        3. converter SMILES as is"""
-        candidates = [query.get("bonded_smiles"), query["smiles_without_h"], query["query_smiles"]]
+        3. converter SMILES as is
+        Charged bond-order SMILES (protonated MD ligands, e.g. R3NH+) are tried neutralised right after."""
+        bonded = query.get("bonded_smiles")
+        candidates = [bonded, neutralize(bonded), query["smiles_without_h"], query["query_smiles"]]
         for smiles in dict.fromkeys(s for s in candidates if s):
             res = await self.client.lookup(smiles, include_synonyms=True, max_synonyms=5)
             if res.found:

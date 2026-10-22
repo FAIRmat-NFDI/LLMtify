@@ -113,3 +113,38 @@ async def test_bare_url_input_and_full_json_still_work(tmp_path: Path, monkeypat
     rt = Runtime(Settings(hackframe_temp_dir=tmp_path / "temp"))
     assert "MOFid identifies 1 node type(s) (Ag)" in await rt.run_workflow("material_pipeline", "abc123DEF456ghi")
     assert "MOFid identifies 1 node type(s) (Ag)" in await rt.run_workflow("material_pipeline", FLAT)
+
+
+@pytest.mark.parametrize("flag", [False, "false"])
+async def test_metainfo_false_nulls_labels_before_saving(tmp_path: Path, monkeypatch, flag) -> None:
+    from tests.test_material_pipeline import install_fakes, llm_down
+    from hackframe.core.material import system_meta
+    from hackframe.core.runtime import Runtime
+    from hackframe.settings import Settings
+
+    install_fakes(monkeypatch)
+    llm_down(monkeypatch)
+    monkeypatch.setattr(nomad, "fetch_archive", lambda entry_id, client=None: make_archive())
+    rt = Runtime(Settings(hackframe_temp_dir=tmp_path / "temp"))
+    await rt.run_workflow("material_pipeline", {"entry": "abc123DEF456ghi", "metainfo": flag})
+
+    (saved,) = list(rt.artifacts.root.glob("*.json"))
+    systems = json.loads(saved.read_text())["systems"]
+    for entry in systems.values():
+        meta = system_meta(entry)
+        assert (meta["label"], meta["structural_type"], meta["building_block"]) == (None, None, None)
+        assert meta["system_relation"] and meta["chemical_formula_hill"]      # everything else kept
+
+
+async def test_metainfo_true_keeps_labels(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_material_pipeline import install_fakes, llm_down
+    from hackframe.core.runtime import Runtime
+    from hackframe.settings import Settings
+
+    install_fakes(monkeypatch)
+    llm_down(monkeypatch)
+    rt = Runtime(Settings(hackframe_temp_dir=tmp_path / "temp"))
+    await rt.run_workflow("material_pipeline", {**FLAT, "metainfo": True})
+    (saved,) = list(rt.artifacts.root.glob("*.json"))
+    data = json.loads(saved.read_text())
+    assert "metainfo" not in data and data["systems"] == FLAT["systems"]

@@ -114,6 +114,9 @@ class WorkflowSpec(BaseModel):
     router: str | None = None  # router only: step id of the router (agentic switch)
     tools: list[str] = Field(default_factory=list)  # router only: tool step ids the router may use
     gather: str = "scrape"  # router only: id of the auto-inserted gather step (its output key)
+    lanes: dict[str, list[str]] = Field(default_factory=dict)  # router only: parallel lanes {name: [tool ids]}
+    max_concurrency: int = 4  # lanes only: items processed at once per lane
+    tool_timeout: float = 300  # lanes only: seconds per tool call (a tool's own `timeout` param + 60 s wins if larger)
 
 
 # ---------- aggregate ----------

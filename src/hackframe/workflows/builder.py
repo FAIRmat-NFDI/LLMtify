@@ -5,6 +5,7 @@ Every workflow:  intake -> [pattern over steps] -> finalize
   fan_out_in : intake => {s1..sn} => merge -> finalize
   graph      : intake => entry steps, custom edges, exit -> finalize
   router     : intake -> pre steps -> router =(switch-case on WorkItem.next_tool)=> tools => gather -> post -> finalize
+  router + lanes: intake -> pre steps -> router =(fan-out, parallel)=> lane_<name>... =(fan-in)=> gather -> post -> finalize
 If the first step is an entry executor (e.g. preprocess) it replaces `intake`
 and the workflow input is that executor's `input_model`.
 """
@@ -19,7 +20,7 @@ from hackframe.core.schemas import TaskInput, WorkItem
 from hackframe.executors import EXECUTORS, BaseStepExecutor, BuildContext
 from hackframe.executors.base import ExecutorCore
 from hackframe.executors.builtin import FinalizeExecutor, IntakeExecutor, MergeExecutor
-from hackframe.executors.routing import GatherExecutor
+from hackframe.executors.routing import GatherExecutor, LaneExecutor, LaneGatherExecutor
 
 
 def _as_list(v: str | list[str]) -> list[str]:
@@ -102,9 +103,21 @@ class WorkflowFactory:
         skip = {spec.router, *spec.tools, intake.id}
         pre = [steps[i] for i in ids[:idx] if i not in skip]
         post = [steps[i] for i in ids[idx + 1 :] if i not in skip]
-        gather = GatherExecutor(id=spec.gather)
-
         wb.add_chain([intake, *pre, router])
+
+        if spec.lanes:  # parallel lanes: MAF fan-out (concurrent) -> lanes -> MAF fan-in
+            if bad := sorted({t for ts in spec.lanes.values() for t in ts} - set(tools)):
+                raise ValueError(f"lanes use tools not listed under `tools`: {bad}")
+            router.lanes = dict(spec.lanes)
+            lanes = [LaneExecutor(name, {t: tools[t] for t in ts}, spec.max_concurrency, spec.tool_timeout)
+                     for name, ts in spec.lanes.items()]
+            lane_gather = LaneGatherExecutor(id=spec.gather)
+            wb.add_fan_out_edges(router, lanes)
+            wb.add_fan_in_edges(lanes, lane_gather)
+            wb.add_chain([lane_gather, *post, finalize])
+            return
+
+        gather = GatherExecutor(id=spec.gather)
 
         def route_to(target: str):
             return lambda m: isinstance(m, WorkItem) and m.next_tool == target

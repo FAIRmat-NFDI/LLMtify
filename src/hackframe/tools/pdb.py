@@ -55,8 +55,9 @@ query structure($id: String!) {
 """
 
 
-def query_PDB_by_sequence(sequence: str, identity_cutoff=0.9) -> dict:
-    """Search PDB for polymer entities matching a protein sequence (RCSB Search API, BLAST-based).
+def query_PDB_by_sequence(sequence: str, identity_cutoff=0.9, sequence_type: str = "protein") -> dict:
+    """Search PDB for polymer entities matching a sequence (RCSB Search API, BLAST-based).
+    sequence_type: "protein" | "dna" | "rna".
 
     Returns the raw JSON response, containing ``result_set`` with ranked hits.
     """
@@ -67,7 +68,7 @@ def query_PDB_by_sequence(sequence: str, identity_cutoff=0.9) -> dict:
             "parameters": {
                 "evalue_cutoff": 0.1,
                 "identity_cutoff": identity_cutoff,
-                "sequence_type": "protein",
+                "sequence_type": sequence_type,
                 "value": sequence
             }
         },

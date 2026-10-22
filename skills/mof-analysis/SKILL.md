@@ -12,9 +12,11 @@ structure with metal centres connected by organic molecules.
 
 ## Steps
 
-1. **Run `mofid` on the root system** (the periodic CIF with the unit cell) - and nothing else.
-   Never send a subsystem cut-out (no cell) to MOFid. No `cif_to_smiles` / PubChem for MOFs.
-2. The judge writes the result from the MOFid JSON alone.
+1. **Run `mofid` on the root system** (the periodic CIF with the unit cell). Never send a subsystem cut-out
+   (no cell) to MOFid.
+2. **In parallel, identify every subsystem**: `cif_to_smiles` -> `pubchem` -> `pubchem_safety` on each molecule
+   subsystem (metal SBU, organic SBU, ligand).
+3. The judge combines both: MOFid for the framework (nodes, linkers, topology), PubChem for the named compounds.
 
 ## Reading MOFid results
 

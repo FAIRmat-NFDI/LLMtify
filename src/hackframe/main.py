@@ -44,6 +44,27 @@ async def _run_agent(rt: Runtime, name: str, prompt: str) -> None:
         print(resp.value.model_dump_json(indent=2) if resp.value else resp.text)
 
 
+def _export_graph(rt: Runtime, name: str, fmt: str, output: str | None, internal: bool) -> None:
+    """MAF built-in visualizer: WorkflowViz(workflow).to_mermaid() / to_digraph() / export(format=...)."""
+    from pathlib import Path
+
+    from agent_framework import WorkflowViz
+
+    viz = WorkflowViz(rt.workflow(name))
+    if fmt in ("mermaid", "dot"):
+        text = viz.to_mermaid(include_internal_executors=internal) if fmt == "mermaid" \
+            else viz.to_digraph(include_internal_executors=internal)
+        if output:
+            Path(output).write_text(text)
+            print(f"wrote {output}")
+        else:
+            print(text)
+        return
+    out = output or f"docs/{name}.{fmt}"
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    print("wrote", viz.export(format=fmt, filename=out, include_internal_executors=internal))
+
+
 def cli() -> None:
     load_dotenv()
     p = argparse.ArgumentParser(prog="hackframe")
@@ -67,6 +88,13 @@ def cli() -> None:
     d = sub.add_parser("devui", help="launch DevUI")
     d.add_argument("--port", type=int)
 
+    g = sub.add_parser("graph", help="export a workflow graph with MAF WorkflowViz")
+    g.add_argument("workflow")
+    g.add_argument("--format", default="mermaid", choices=["mermaid", "dot", "svg", "png", "pdf"],
+                   help="mermaid/dot print text; svg/png/pdf need graphviz (pip install graphviz + apt install graphviz)")
+    g.add_argument("-o", "--output", help="output file (default: docs/<workflow>.<ext>)")
+    g.add_argument("--internal", action="store_true", help="include internal executors (intake/finalize)")
+
     pc = sub.add_parser("pubchem", help="test the PubChem tool directly (no LLM)")
     pc.add_argument("smiles")
 
@@ -83,6 +111,9 @@ def cli() -> None:
 
     if args.cmd == "list":
         print(json.dumps(rt.describe(), indent=2))
+        return
+    if args.cmd == "graph":
+        _export_graph(rt, args.workflow, args.format, args.output, args.internal)
         return
     if args.cmd == "devui":
         from hackframe.devui.server import launch

@@ -1,6 +1,6 @@
 ---
 name: protein-chain-sequence
-description: Use this skill when you are working with a molecular system that is a protein chain and need its amino acid sequence. Triggers include requests for the sequence, residues, or any task where a protein chain's amino acid sequence is a required input. Do not use for non-protein systems (nucleic acids, small molecules, ligands, etc.).
+description: Use this skill when you are working with a molecular system that is a protein chain (or a DNA/RNA chain) and need its sequence. Triggers include requests for the sequence, residues, or any task where a protein chain's amino acid sequence is a required input. Do not use for small molecules, ligands, ions or water.
 ---
 
 # Protein chain: CIF to amino acid sequence
@@ -9,8 +9,9 @@ description: Use this skill when you are working with a molecular system that is
 
 Use this skill when the system you are looking at is a **protein chain** and you need its amino acid sequence.
 
-If the system is not a protein chain (for example DNA/RNA, a ligand, or a small molecule), do not use this
-skill or plan `cif_to_seq`. If you are unsure of the system type, check it first rather than guessing:
+`cif_to_seq` also handles DNA/RNA chains (nucleotide sequence; `pdb_lookup` then searches nucleic-acid
+entities; sequences shorter than 20 are too short for the RCSB search and are reported as such).
+Do not plan `cif_to_seq` for ligands, ions, water or small molecules - they go to `cif_to_smiles` -> `pubchem`. If you are unsure of the system type, check it first rather than guessing:
 a protein chain contains only C, H, N, O (and S), has many atoms, and its formula has roughly one N per
 3-4 C (peptide backbone).
 

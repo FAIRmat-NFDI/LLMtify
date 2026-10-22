@@ -1,0 +1,10 @@
+% \usepackage{graphicx} in the preamble
+\begin{figure}[t]   % two-column paper: figure* + width=0.9\textwidth
+  \centering
+  \includegraphics[width=0.9\textwidth]{pipeline_latex.pdf}
+  \caption{Agentic material pipeline. The tool finder (LLM + skills) judges the material class;
+    \texttt{enforce\_route} then fixes the tool chain: MOF $\rightarrow$ MOFid, protein $\rightarrow$
+    sequence $\rightarrow$ PDB, molecular $\rightarrow$ SMILES $\rightarrow$ PubChem. All findings are
+    gathered and summarised by the judge.}
+  \label{fig:pipeline}
+\end{figure}

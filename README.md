@@ -243,15 +243,37 @@ on the skills `tool-finder`, `mof-analysis`, `protein-chain-sequence`, `generic-
 
 | class | route | judge adds |
 |---|---|---|
-| mof | root only → `mofid` → judge (no CIF→SMILES / PubChem) | nodes, linkers (+ formulas), topology (never guessed), MOFkey |
-| protein | chain only → `cif_to_seq` → `pdb_lookup` → judge (no CIF→SMILES / PubChem) | residue count, PDB entry, organism |
+| mof | root → `mofid` **and, in parallel,** every molecule subsystem → `cif_to_smiles` → `pubchem` → `pubchem_safety` → judge | MOFid framework (nodes, linkers, topology) + PubChem names/IDs per subsystem |
+| protein (any biomolecular system) | polymer chains (protein, DNA, RNA) → `cif_to_seq` → `pdb_lookup`; every other molecule subsystem (ligand, ions, water) → `cif_to_smiles` → `pubchem` → `pubchem_safety`, in parallel | chains with lengths, PDB entries, named ligands/ions |
 | molecular / other | molecule subsystems → `cif_to_smiles` → `pubchem` → `pubchem_safety` | composition, compounds |
 
 MOFid setup (once): `./run.sh mofid` installs SingularityCE 4.6 (Ubuntu 24.04 .deb) and downloads `external/mofid.sif`
 (`MOFID_SIF` in `.env`; also searched: `external/`, `~/Downloads/`, `~/`).
-The MOF and protein routes are **strict**: the LLM judges the class, then `enforce_route` takes the tools from the
-skill metadata `route_mof_tools` / `route_protein_tools`, whatever else the LLM planned. Inside Docker/containers, `--userns` is retried automatically; extra flags go in
+The LLM judges the class, then `enforce_route` takes the tools from the skill metadata (`route_mof_tools`,
+`route_mof_subsystem_tools`, `route_protein_tools`), whatever else the LLM planned. Inside Docker/containers, `--userns` is retried automatically; extra flags go in
 `MOFID_SINGULARITY_FLAGS`. If MOFid is missing, the `mofid` step reports an error and the judge still runs.
+
+### Parallel lanes (concurrency)
+
+MAF delivers one executor's messages one at a time, so per-subsystem switch-case routing ran sequentially.
+With `lanes:` in `workflows.yaml` the router sends one `RoutePlan` over a MAF **fan-out** (lanes run in parallel)
+and the lanes meet in a MAF **fan-in** (`scrape`), which waits for all of them:
+
+```
+tool_finder ══▶ lane_mof      (mofid)                                  ══╗
+            ══▶ lane_molecule (cif_to_smiles → pubchem → pubchem_safety) ══╬══▶ scrape ─▶ judge
+            ══▶ lane_protein  (cif_to_seq → pdb_lookup)                  ══╝
+```
+Inside a lane, subsystems run concurrently (`max_concurrency`, default 4); each subsystem's tools run in order.
+Each tool call has a time limit (`tool_timeout`, default 300 s; a tool's own `timeout` + 60 s if larger) and every
+tool/subsystem logs its duration, so a slow step shows up in the log instead of stalling silently.
+`scrape.planner.lane_seconds` shows each lane's wall time. Without `lanes:` the old switch-case routing is used.
+
+### Agentic judge
+
+The judge's LLM gets the evidence (primary) plus a `read_cif(system)` tool. If the evidence has gaps it may read
+CIFs and use its own knowledge; those statements come back in `knowledge_notes` and are listed under the report
+table as *Not from the mined data*. Limits: `cif_max_reads` (4), `cif_max_chars` (6000) on the judge step.
 
 Routing is MAF-native: the router sets `WorkItem.plan`, and `add_switch_case_edge_group` sends each item to the
 tool named by `next_tool` (or to `scrape` when the chain is done). LLM calls per run: tool_finder 1, judge 1,
@@ -298,13 +320,30 @@ python -m hackframe run material_pipeline --input-file examples/material_example
 
 ### Input from NOMAD
 
+`metainfo` (default `true`): with `false`, `label`, `structural_type` and `building_block` are set to `null` in
+every subsystem before the JSON is saved, so the tool finder must judge the material from formula, elements and
+CIFs alone (the label-based no-LLM fallback then finds no MOF/protein label).
+
 The workflow input can be a NOMAD entry instead of the full JSON:
 
 ```bash
 python -m hackframe run material_pipeline --input '{"entry": "https://nomad-lab.eu/prod/v1/gui/search/entries/entry/id/<entry_id>"}'
 python -m hackframe run material_pipeline --input '{"entry": "<entry_id>"}'
+python -m hackframe run material_pipeline --input '{"entry": "<entry_id>", "metainfo": false}'
 ```
 DevUI: paste `{"entry": "<url or entry_id>"}` (or just the URL) into the input box. `preprocess` fetches the archive
 (`tools/nomad.py`, NomadClient, `required_data`), converts `results.material.topology` + `run/system/atoms` into
 `{systems, cifs}` (root with cell, subsystems as Cartesian cut-outs, metres → Å) and stores it in `temp/<uuid>.json`.
 The full JSON input still works. API base: `NOMAD_BASE_URL` in `.env`.
+
+## Workflow graph (MAF WorkflowViz)
+
+```bash
+python -m hackframe graph material_pipeline                     # Mermaid text (MAF's to_mermaid)
+python -m hackframe graph material_pipeline --format dot        # Graphviz DOT
+python -m hackframe graph material_pipeline --format png        # docs/material_pipeline.png (needs: apt install graphviz)
+python -m hackframe graph material_pipeline --format svg -o x.svg --internal   # incl. intake/finalize
+```
+In code: `WorkflowViz(rt.workflow("material_pipeline")).export(format="svg", filename="graph.svg")`.
+This shows the wiring: every tool can hand off to every other, because routes are chosen at run time.
+For the per-class flow, see `docs/pipeline.mmd`.

@@ -115,7 +115,7 @@ async def test_llm_plan_routes_tools_and_judge_summarises(rt: Runtime, monkeypat
             SystemPlan(system="results/material/topology/1", tools=[], reason="bulk"),
         ])
 
-    async def judge(self, evidence):
+    async def judge(self, evidence, *_):
         seen["evidence"] = evidence
         return MaterialSummary(
             summary="The given system is a MOF containing Ag atoms (PubChem ID 23954).",
@@ -144,7 +144,7 @@ async def test_fallbacks_when_llm_is_down(rt: Runtime, monkeypatch) -> None:
     out = await rt.run_workflow("material_pipeline", EXAMPLE)
 
     assert out["generated_by"] == "fallback"
-    assert out["summary"].startswith("The given system is a MOF containing Silver (PubChem ID 23954)")
+    assert out["summary"].startswith("The given system is a metal-organic framework (MOF) containing Silver (PubChem ID 23954)")
     planned = [c["system"] for c in out["evidence"]["components"]]
     assert planned == [AG, "results/material/topology/5"]  # skill metadata: molecule subsystems with a CIF
     assert out["evidence"]["material_class"] == "molecular"
@@ -193,7 +193,7 @@ async def test_bad_agent_answer_stops_chain_but_judge_runs(rt: Runtime, monkeypa
     errs = out["errors"]["results/material/topology/5"]  # Ag matched by SMILES; the linker went to the agent
     assert "formatting retry returned no JSON" in errs["pubchem"] and "pubchem_safety" not in errs
     assert AG not in out["errors"]
-    assert out["summary"].startswith("The given system is a MOF containing Silver (PubChem ID 23954)")
+    assert out["summary"].startswith("The given system is a metal-organic framework (MOF) containing Silver (PubChem ID 23954)")
 
 
 def test_extract_json() -> None:
@@ -262,7 +262,7 @@ async def test_markdown_report_is_the_workflow_output(tmp_path: Path, monkeypatc
 
     assert isinstance(report, str)
     summary, table = report.split("\n\n", 1)
-    assert summary.startswith("The given system is a MOF containing Silver (PubChem ID 23954)")
+    assert summary.startswith("The given system is a metal-organic framework (MOF) containing Silver (PubChem ID 23954)")
     assert "vendors" not in summary  # no uses/vendors/hazards for elements
     lines = table.strip().splitlines()
     assert lines[:2] == ["| subsystem | description |", "|---|---|"]
@@ -278,7 +278,7 @@ async def test_llm_rows_fill_gaps_from_template(rt: Runtime, monkeypatch) -> Non
     async def plan(self, systems):
         return ToolPlan(material_class="molecular", class_reason="test: molecular route", plans=[SystemPlan(system=AG, tools=["cif_to_smiles", "pubchem"], reason="metal")])
 
-    async def judge(self, evidence):  # LLM returns only one row
+    async def judge(self, evidence, *_):  # LLM returns only one row
         return MaterialSummary(summary="S.", subsystems=[SubsystemRow(system=AG, description="Ag row from LLM")], key_facts=[])
 
     monkeypatch.setattr(ToolFinderExecutor, "ask_llm", plan)

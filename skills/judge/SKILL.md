@@ -30,11 +30,10 @@ You receive EVIDENCE: `material_class` + `class_reason` (decided by the tool fin
 
 ## Per material class (add after the points above)
 
-- **mof** (`mofid` summary present): the MOF route uses MOFid only (no PubChem). Write from the MOFid JSON:
-  "The given system is a metal-organic framework (MOF)", the node(s) (`nodes` / `node_formulas`, e.g. Ag), the
-  organic linker(s) (`linker_formulas`, e.g. C38H28N4; name a linker only if you are certain from its SMILES),
-  the net topology (`topology`) and catenation. If `topology_failed` is true say the topology could not be
-  determined. Do not mention PubChem IDs, uses, vendors or hazards.
+- **mof**: two sources, both primary. MOFid (root `tool_summaries.mofid`) for the framework: node(s), organic
+  linker(s) (`linker_formulas`), net topology / catenation (if `topology_failed` say it could not be determined).
+  PubChem (subsystem `compounds`) for the named building blocks with PubChem IDs, uses, vendors, hazards (points 2-4).
+  Name a MOFid linker by its PubChem name when a subsystem compound has the same formula.
 - **protein** (`cif_to_seq` / `pdb_lookup` summaries): "The given system is a protein chain of N residues."
   If `pdb_lookup` found an entry: the most similar PDB entry (`pdb_id`), its `description`, `organism` and,
   if present, gene and UniProt accession. If nothing was found, say no similar PDB entry (>= 90 % identity) exists.
@@ -58,9 +57,20 @@ You receive EVIDENCE: `material_class` + `class_reason` (decided by the tool fin
 
 Unidentified molecule: "A representative organic molecule (not identified in PubChem)".
 
+## When the mined evidence is not sufficient (agentic)
+
+Evidence is primary. Only if it leaves gaps (an organic subsystem not identified, MOFid or PubChem failed, no
+topology), you MAY:
+1. call `read_cif(system)` for the subsystem in question (max 4 reads; keys from `systems`, `has_cif: true`);
+2. use your own chemistry knowledge on that structure (functional groups, coordination, likely compound class).
+Every statement obtained this way goes into `knowledge_notes` and is hedged in the summary ("likely",
+"based on the structure"). Never present it as a database result; never invent PubChem/PDB IDs or names of
+specific vendors/hazards.
+
 ## Rules
 
-- Use ONLY facts in the evidence. If a value is missing, leave it out; never guess names, IDs, numbers or hazards.
+- Facts come from the evidence; anything else only via the agentic step above (hedged, in `knowledge_notes`).
+  Never guess IDs, numbers or hazards.
 - Do not mention SMILES, tool names or errors.
 
 ## Target style

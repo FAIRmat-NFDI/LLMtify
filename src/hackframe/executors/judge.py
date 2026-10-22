@@ -1,6 +1,8 @@
 """EXTIR_JUDGE: gathers every subsystem finding and writes the report:
 a natural-language summary + a table describing every subsystem.
-An LLM grounded on the `judge` skill; only facts present in the evidence may be used.
+An LLM grounded on the `judge` skill. The mined evidence (MOFid, PubChem, PDB, ...) is primary.
+Agentic: if the evidence is not sufficient, the LLM may call `read_cif(system)` (the input CIFs) and use
+its own chemistry knowledge; such statements are listed in `knowledge_notes` and hedged in the summary.
 
 workflows.yaml:
   - {id: judge, type: judge, agent: judge, source: scrape, structure: compact}
@@ -39,6 +41,10 @@ class MaterialSummary(BaseModel):
     summary: str = Field(..., description="The natural-language summary paragraph")
     subsystems: list[SubsystemRow] = Field(..., description="One row per subsystem in the evidence, same order")
     key_facts: list[str] = Field(..., description="Short facts used, each traceable to the evidence")
+    knowledge_notes: list[str] = Field(
+        default_factory=list,
+        description="Statements NOT from the mined evidence (from reading CIFs / own knowledge); empty if none",
+    )
 
 
 def short_key(system: str) -> str:
@@ -52,9 +58,11 @@ def _trim_uses(uses: list[str], n: int = 5, max_len: int = 60) -> list[str]:
     return short[:n]
 
 
-def render_report(summary: str, rows: list[SubsystemRow]) -> str:
+def render_report(summary: str, rows: list[SubsystemRow], notes: list[str] | None = None) -> str:
     lines = [summary.strip(), "", "| subsystem | description |", "|---|---|"]
     lines += [f"| {short_key(r.system)} | {r.description.strip().replace('|', '/')} |" for r in rows]
+    if notes:  # transparency: what did not come from the mined databases/tools
+        lines += ["", "*Not from the mined data (CIF reading / model knowledge):*"] + [f"- {n}" for n in notes]
     return "\n".join(lines) + "\n"
 
 
@@ -94,6 +102,8 @@ class JudgeExecutor(BaseStepExecutor):
                     "structural_type": meta.get("structural_type"),
                     "system_relation": meta.get("system_relation"),
                     "parent_system": meta.get("parent_system"),
+                    "formula": meta.get("chemical_formula_hill"),
+                    "has_cif": k in (small.get("system_cif") or {}),
                 }
             )
         components = []
@@ -132,12 +142,37 @@ class JudgeExecutor(BaseStepExecutor):
             "components": components,
         }
 
-    async def ask_llm(self, evidence: dict[str, Any]) -> MaterialSummary:
+    def cif_reader(self, message: StepMessage, reads: list[str]):
+        """Function tool for the judge agent: read one input CIF (bounded size and number of reads)."""
+        system_cif = (message.output_of(self.structure).get("system_cif") or {})
+        max_chars, max_reads = int(self.params.get("cif_max_chars", 6000)), int(self.params.get("cif_max_reads", 4))
+
+        async def read_cif(system: str) -> str:
+            """Read the CIF of one subsystem from the input (key exactly as in EVIDENCE.systems). Use only when the
+            mined evidence is not sufficient to describe the system."""
+            if len(reads) >= max_reads:
+                return f"read limit reached ({max_reads} CIFs)"
+            key = system_cif.get(system)
+            if not key or self.artifacts is None:
+                return f"no CIF for {system!r}"
+            reads.append(system)
+            cif = await self.artifacts.get_cif(message.artifact_id, key)
+            return cif if len(cif) <= max_chars else cif[:max_chars] + f"\n... [truncated, {len(cif)} chars total]"
+
+        return read_cif
+
+    async def ask_llm(self, evidence: dict[str, Any], message: StepMessage | None = None,
+                      reads: list[str] | None = None) -> MaterialSummary:
         prompt = (
-            "Write the material report following the judge skill. Use ONLY facts in this evidence.\n\n"
+            "Write the material report following the judge skill.\n"
+            "The mined EVIDENCE is primary: state its facts as facts. If it is not sufficient (e.g. a component was\n"
+            "not identified, a tool failed, the topology is unknown), you may call read_cif(system) and use your own\n"
+            "chemistry knowledge. Hedge such statements ('likely', 'based on the structure') and list each one in\n"
+            "knowledge_notes. Never present knowledge-based guesses as database results (no invented IDs).\n\n"
             f"EVIDENCE:\n{json.dumps(evidence, indent=2)}"
         )
-        response = await self.agent.run(prompt, options={"response_format": MaterialSummary})
+        tools = [self.cif_reader(message, reads if reads is not None else [])] if message is not None else None
+        response = await self.agent.run(prompt, tools=tools, options={"response_format": MaterialSummary})
         if response.value is None:
             raise ValueError(f"no structured summary from LLM; raw: {response.text[:300]}")
         return response.value
@@ -157,15 +192,20 @@ class JudgeExecutor(BaseStepExecutor):
             seq = next((t for t in tools.values() if "length" in t and "sequence" in t), None)
             pdb = next((t for t in tools.values() if t.get("pdb_id")), None)
             if seq:
-                text = f"A protein chain of {seq['length']} residues"
+                kind = "protein" if seq.get("polymer", "protein") == "protein" else seq["polymer"].upper()
+                text = f"A {kind} chain of {seq['length']} {seq.get('unit', 'residues')}"
                 if pdb:
                     desc = ", ".join(pdb.get("description", [])[:1])
                     text += f", most similar to PDB {pdb['pdb_id']}" + (f" ({desc})" if desc else "")
             elif s.get("system_relation") == "root" or stype == "bulk":
                 text = "The original system"
+            elif stype == "group" and label.startswith("group_"):  # biomolecular: group_DNA_chain_C, group_ALA ...
+                text = f"The group of all {label.removeprefix('group_')} copies in the system"
             elif stype == "group":
                 kind = "metal atoms" if "metal" in label else "ligands" if "ligand" in label else "organic molecules"
                 text = f"The group of all {kind} in the system"
+            elif stype == "monomer":
+                text = f"Residue type {label}" if label else "A residue type"
             elif stype == "molecule":
                 kind = "metal unit" if "metal" in label else "ligand" if "ligand" in label else "organic molecule"
                 if cpd:
@@ -184,9 +224,13 @@ class JudgeExecutor(BaseStepExecutor):
         framework = next(
             (s["label"] for s in evidence["systems"] if s.get("structural_type") == "bulk" and s.get("label")), None
         )
+        if not framework and evidence.get("material_class") == "mof":
+            framework = "MOF"
         compounds = list({c["cid"]: c for comp in evidence["components"] for c in comp["compounds"]}.values())
         rows = cls.template_rows(evidence)
         extra, extra_facts = cls.domain_sentences(evidence)
+        if not compounds and extra and extra[0].startswith("MOFid"):
+            extra[0] = "The given system is a metal-organic framework (MOF). " + extra[0]
         if not compounds:
             cls_text = {"mof": "a metal-organic framework (MOF)", "protein": "a protein"}.get(evidence.get("material_class") or "")
             fallback = (f"The given system is {cls_text}; its analysis tool did not return a result."
@@ -194,8 +238,14 @@ class JudgeExecutor(BaseStepExecutor):
             summary = " ".join(extra) if extra else fallback
             return MaterialSummary(summary=summary, subsystems=rows, key_facts=extra_facts)
         names = [f"{c.get('name', 'unknown')} (PubChem ID {c['cid']})" for c in compounds]
+        if framework and framework.upper() == "MOF":
+            framework = "metal-organic framework (MOF)"
         head = f"The given system is a {framework} containing " if framework else "The given system contains "
-        sentences = [head + (", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]) + "."]
+        lead: list[str] = []
+        if extra and extra[0].startswith("The given system contains a "):  # polymer chains come first
+            lead, extra = [extra[0]], extra[1:]
+            head = "It also contains "
+        sentences = lead + [head + (", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]) + "."]
         facts = list(names)
         for c in compounds:
             if c.get("formula", "").isalpha() and len(c.get("formula", "")) <= 2:  # element: no uses/hazards
@@ -225,28 +275,42 @@ class JudgeExecutor(BaseStepExecutor):
                             else "MOFid could not determine its net topology")
                     if t.get("catenation") is not None and not t.get("topology_failed"):
                         topo += f" (catenation {t['catenation']})"
-                    sentences.insert(0, f"The given system is a metal-organic framework (MOF). MOFid identifies "
+                    sentences.insert(0, "MOFid identifies "
                                         f"{len(t.get('nodes', []))} node type(s) ({nodes}) and "
                                         f"{len(t.get('linkers', []))} organic linker type(s) ({linkers}); {topo}.")
                     facts.append(f"MOFid: {t['mofid']}")
                     if t.get("mofkey"):
                         facts.append(f"MOFkey: {t['mofkey']}")
-                elif t.get("pdb_id"):
-                    desc = ", ".join(t.get("description", [])[:1]) or "a protein"
-                    org = ", ".join(t.get("organism", [])[:1])
-                    sentences.append(f"The chain is most similar to PDB entry {t['pdb_id']} ({desc}"
+        # polymer chains (cif_to_seq + pdb_lookup): one sentence listing all chains, one per PDB match
+        chains, pdb_sentences = [], []
+        for comp in evidence["components"]:
+            tools = comp.get("tool_summaries", {})
+            seq = next((t for t in tools.values() if "length" in t and "sequence" in t), None)
+            pdb = next((t for t in tools.values() if t.get("pdb_id")), None)
+            name = comp.get("label") or short_key(comp["system"])
+            if seq:
+                polymer = seq.get("polymer", "protein")
+                kind = "protein" if polymer == "protein" else polymer.upper()
+                chains.append(f"a {kind} chain ({name}, {seq['length']} {seq.get('unit', 'residues')})")
+                facts.append(f"{name} sequence: {seq['sequence']}")
+            if pdb:
+                desc = ", ".join(pdb.get("description", [])[:1]) or "a polymer"
+                org = ", ".join(pdb.get("organism", [])[:1])
+                pdb_sentences.append(f"{name} is most similar to PDB entry {pdb['pdb_id']} ({desc}"
                                      + (f", {org}" if org else "") + ").")
-                    facts.append(f"PDB {t['pdb_id']}")
-                elif "length" in t and "sequence" in t:
-                    sentences.insert(0, f"The given system is a protein chain of {t['length']} residues.")
-                    facts.append(f"sequence: {t['sequence']}")
+                facts.append(f"PDB {pdb['pdb_id']}")
+        if chains:
+            listed = ", ".join(chains[:-1]) + " and " + chains[-1] if len(chains) > 1 else chains[0]
+            sentences.insert(0, f"The given system contains {listed}.")
+        sentences += pdb_sentences
         return sentences, facts
 
     # ------------------------------------------------------------------ step
     async def process(self, message: StepMessage) -> dict[str, Any]:
         evidence = self.evidence(message)
+        reads: list[str] = []
         try:
-            result, by = await self.ask_llm(evidence), "llm"
+            result, by = await self.ask_llm(evidence, message, reads), "llm"
         except Exception as exc:
             log.warning("judge LLM failed (%s); using template", exc)
             result, by = self.template(evidence), "fallback"
@@ -259,7 +323,9 @@ class JudgeExecutor(BaseStepExecutor):
             "summary": result.summary,
             "subsystems": [r.model_dump() for r in rows],
             "key_facts": result.key_facts,
-            "report": render_report(result.summary, rows),
+            "knowledge_notes": result.knowledge_notes,
+            "cif_reads": reads,
+            "report": render_report(result.summary, rows, result.knowledge_notes),
             "generated_by": by,
             "evidence": evidence,
             # diagnostics only (kept out of the LLM evidence so the summary never talks about errors)

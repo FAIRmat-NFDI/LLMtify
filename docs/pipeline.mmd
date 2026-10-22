@@ -1,0 +1,102 @@
+%%{init: {"theme": "base", "flowchart": {"curve": "basis", "nodeSpacing": 40, "rankSpacing": 50}, "themeVariables": {"fontFamily": "Arial, Helvetica, sans-serif", "fontSize": "15px", "lineColor": "#64748b"}}}%%
+flowchart TB
+
+    %% ───────────── INPUT ─────────────
+    IN(["📥 <b>Input</b><br/>{entry: NOMAD url} · bare id/url · full JSON"])
+
+    subgraph S1["① INGEST"]
+        direction TB
+        PRE["<b>preprocess</b><br/>NOMAD archive → {systems, cifs}<br/>save <i>temp/&lt;uuid&gt;.json</i>"]
+        CMP["<b>compact</b><br/>small view: labels, formulas,<br/>elements, has_cif (no CIF bodies)"]
+        PRE --> CMP
+    end
+
+    subgraph S2["② AGENTIC SWITCH"]
+        direction TB
+        TF{{"🧠 <b>tool_finder</b> · LLM (HU llm3 via LiteLLM)<br/>skills: tool-finder · mof-analysis<br/>protein-chain-sequence<br/>generic-system-analysis<br/><br/>judges <b>material_class</b> + class_reason"}}
+        ENF["🔒 <b>enforce_route</b><br/>route_&lt;class&gt;_tools from skill metadata"]
+        TF --> ENF
+    end
+
+    IN --> PRE
+    CMP --> TF
+
+    %% ───────────── ROUTES ─────────────
+    subgraph RM["③ MOF route (parallel with subsystems)"]
+        direction TB
+        MOF["<b>mofid</b> · Get_mof_id<br/>root CIF → singularity mofid.sif<br/>nodes · linkers · topology · MOFkey"]
+    end
+
+    subgraph RP["③ PROTEIN route · strict"]
+        direction TB
+        SEQ["<b>cif_to_seq</b> · Cif2Seq<br/>chain CIF → amino-acid sequence<br/>(Open Babel + Biopython)"]
+        PDB["<b>pdb_lookup</b><br/>sequence → RCSB PDB (≥ 90 % identity)<br/>description · organism · UniProt"]
+        SEQ --> PDB
+    end
+
+    subgraph RG["③ MOLECULAR / MOF-subsystem lane"]
+        direction TB
+        SMI["<b>cif_to_smiles</b><br/>molecule CIF → SMILES (ASE + RDKit)"]
+        PC["<b>pubchem</b><br/>SMILES → CID · PubChem MCP"]
+        SAF["<b>pubchem_safety</b><br/>GHS · uses · vendors"]
+        SMI --> PC --> SAF
+    end
+
+    ENF -- "mof" --> MOF
+    ENF -- "protein" --> SEQ
+    ENF -- "molecular / other" --> SMI
+
+    %% ───────────── GATHER + JUDGE ─────────────
+    subgraph S4["④ REPORT"]
+        direction TB
+        SCR[("📦 <b>scrape</b> · gather<br/>findings per subsystem")]
+        JDG{{"⚖️ <b>judge</b> · LLM + skill judge<br/>evidence (primary) → summary + table<br/>tool: read_cif + own knowledge if needed<br/><i>(template if LLM is down)</i>"}}
+        SCR --> JDG
+    end
+
+    MOF --> SCR
+    PDB --> SCR
+    SAF --> SCR
+
+    OUT(["📄 <b>Markdown report</b><br/>summary paragraph + | subsystem | description |"])
+    JDG --> OUT
+
+    %% ───────────── SIDE: infra ─────────────
+    OBS[/"📈 OpenTelemetry → Aspire dashboard · DevUI"/]
+    S4 -.-> OBS
+
+    ENF -. "mof: every subsystem" .-> SMI
+
+    %% ───────────── STYLES ─────────────
+    classDef io      fill:#0f172a,stroke:#0f172a,color:#f8fafc,stroke-width:2px
+    classDef ingest  fill:#e0e7ff,stroke:#4f46e5,color:#1e1b4b,stroke-width:1.5px
+    classDef llm     fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:2.5px
+    classDef enforce fill:#fef9c3,stroke:#ca8a04,color:#422006,stroke-width:1.5px
+    classDef mof     fill:#ffedd5,stroke:#ea580c,color:#431407,stroke-width:1.5px
+    classDef prot    fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:1.5px
+    classDef mol     fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px
+    classDef gather  fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:1.5px
+    classDef infra   fill:#ffffff,stroke:#94a3b8,color:#475569,stroke-dasharray:4 3
+
+    class IN,OUT io
+    class PRE,CMP ingest
+    class TF,JDG llm
+    class ENF enforce
+    class MOF mof
+    class SEQ,PDB prot
+    class SMI,PC,SAF mol
+    class SCR gather
+    class OBS infra
+
+    style S1 fill:#f8fafc,stroke:#c7d2fe,color:#4338ca
+    style S2 fill:#faf5ff,stroke:#c4b5fd,color:#6d28d9
+    style RM fill:#fff7ed,stroke:#fdba74,color:#c2410c
+    style RP fill:#f0fdf4,stroke:#86efac,color:#15803d
+    style RG fill:#eff6ff,stroke:#93c5fd,color:#1d4ed8
+    style S4 fill:#f8fafc,stroke:#cbd5e1,color:#334155
+
+    linkStyle 7 stroke:#ea580c,stroke-width:3px
+    linkStyle 8 stroke:#16a34a,stroke-width:3px
+    linkStyle 9 stroke:#2563eb,stroke-width:3px
+    linkStyle 10,11,12,13 stroke:#475569,stroke-width:2px
+    linkStyle 16 stroke:#ea580c,stroke-width:2.5px,stroke-dasharray:6 4

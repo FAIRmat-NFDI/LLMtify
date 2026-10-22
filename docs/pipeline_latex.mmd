@@ -1,0 +1,44 @@
+%%{init: {"theme": "base", "flowchart": {"curve": "basis", "nodeSpacing": 18, "rankSpacing": 38, "padding": 8, "htmlLabels": true}, "themeVariables": {"fontFamily": "Helvetica, Arial, sans-serif", "fontSize": "20px", "lineColor": "#64748b", "edgeLabelBackground": "#ffffff"}}}%%
+flowchart LR
+    IN(["<b>Input</b><br/>structure"])
+    PRE["<b>Parse</b><br/>systems + CIFs"]
+    TF{{"<b>Classifier</b><br/>LLM + skills &nbsp;"}}
+    SMI["<b>SMILES</b>"]
+    PC["<b>PubChem</b>"]
+    SEQ["<b>Sequence</b>"]
+    PDB["<b>PDB</b>"]
+    MOF["<b>MOFid</b>"]
+    JDG{{"<b>Judge</b><br/>LLM + CIF reading &nbsp;"}}
+    OUT(["<b>Summary</b>"])
+
+    IN --> PRE
+    PRE --> TF
+    TF -- "Molecular" --> SMI
+    TF -- "Protein" --> SEQ
+    TF -- "MOF" --> MOF
+    SMI --> PC
+    SEQ --> PDB
+    PC --> JDG
+    PDB --> JDG
+    MOF --> JDG
+    JDG --> OUT
+    TF -. "MOF subsystems" .-> SMI
+
+    classDef io      fill:#0f172a,stroke:#0f172a,color:#f8fafc
+    classDef ingest  fill:#e0e7ff,stroke:#4f46e5,color:#1e1b4b
+    classDef llm     fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:2px
+    classDef mof     fill:#ffedd5,stroke:#ea580c,color:#431407
+    classDef prot    fill:#dcfce7,stroke:#16a34a,color:#052e16
+    classDef mol     fill:#dbeafe,stroke:#2563eb,color:#172554
+
+    class IN,OUT io
+    class PRE ingest
+    class TF,JDG llm
+    class MOF mof
+    class SEQ,PDB prot
+    class SMI,PC mol
+
+    linkStyle 2,5,7 stroke:#2563eb,stroke-width:3px,color:#1d4ed8
+    linkStyle 3,6,8 stroke:#16a34a,stroke-width:3px,color:#15803d
+    linkStyle 4,9 stroke:#ea580c,stroke-width:3px,color:#c2410c
+    linkStyle 11 stroke:#ea580c,stroke-width:2.5px,stroke-dasharray:6 4,color:#c2410c

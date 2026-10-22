@@ -1,4 +1,4 @@
-"""Protein chain CIF -> amino acid sequence (domain team's code).
+"""Protein chain CIF -> amino acid sequence (domain team's code), plus DNA/RNA chains.
 
 primary : protein_chain_cif_to_aa_sequence  (Open Babel CIF -> PDB, Biopython reads residues)
 fallback: cif_to_sequences                  (topology-based backbone/side-chain matching; the domain
@@ -11,6 +11,41 @@ import warnings
 from io import StringIO
 
 import numpy as np
+
+# Biopython warns per residue for MD/PDB-like input (duplicate H names, no HEADER); catch_warnings() is not
+# thread-safe (tools run in worker threads in parallel), so silence these categories process-wide.
+warnings.filterwarnings("ignore", module=r"Bio\.PDB")
+warnings.filterwarnings("ignore", module=r"Bio\.SeqIO")
+
+# nucleotide residue names (PDB, Open Babel, Amber 5'/3' variants) -> one letter
+_NUC = {"A": "A", "C": "C", "G": "G", "T": "T", "U": "U", "I": "I",
+        "DA": "A", "DC": "C", "DG": "G", "DT": "T", "DU": "U", "DI": "I",
+        "RA": "A", "RC": "C", "RG": "G", "RU": "U"}
+
+
+def _nuc_letter(resname: str) -> str | None:
+    name = resname.strip().upper().rstrip("35")  # Amber: DA5 / DA3 / RU5 ...
+    return _NUC.get(name)
+
+
+def nucleic_acid_cif_to_sequence(cif_string: str) -> tuple[str, str]:
+    """DNA/RNA chain CIF -> (sequence, 'dna' | 'rna'). Open Babel perceives the nucleotide residues
+    (same CIF -> PDB step as the protein path); empty sequence if there are none."""
+    from openbabel import pybel
+
+    pdb_string = pybel.readstring("cif", cif_string).write("pdb")
+    residues: list[tuple[str, str, str]] = []
+    for line in pdb_string.splitlines():
+        if line.startswith(("ATOM", "HETATM")):
+            key = (line[21], line[22:27], line[17:20])
+            if not residues or residues[-1] != key:
+                residues.append(key)
+    letters = [l for _, _, name in residues if (l := _nuc_letter(name))]
+    if len(letters) < max(2, len(residues) // 2):  # mostly not nucleotides
+        return "", ""
+    names = {name.strip().upper() for _, _, name in residues}
+    rna = "U" in letters or any(n.startswith("R") for n in names)
+    return "".join(letters), "rna" if rna else "dna"
 
 
 def protein_chain_cif_to_aa_sequence(cif_string):

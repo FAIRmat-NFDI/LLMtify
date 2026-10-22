@@ -105,6 +105,7 @@ class WorkItem(BaseModel):
     cif_key: str | None = None  # e.g. "results/material/topology/3.cif" (None if the input has no CIF)
     plan: list[str] = Field(default_factory=list)  # tool executor ids, in order
     reason: str = ""  # why the router chose this plan
+    lane: str | None = None  # parallel lane that runs this item (lanes pattern)
     cursor: int = 0
     findings: dict[str, Any] = Field(default_factory=dict)  # tool id -> output
     errors: dict[str, str] = Field(default_factory=dict)  # tool id -> error
@@ -128,3 +129,23 @@ class ScrapeStart(BaseModel):
     expected: int
     base: StepMessage
     planner: dict[str, Any] = Field(default_factory=dict)  # {"by": "llm"|"fallback"|"skipped", ...}
+
+
+class RoutePlan(BaseModel):
+    """Router -> every lane (MAF fan-out, concurrent): all planned items; each lane takes its own."""
+
+    run_id: str
+    base: StepMessage
+    planner: dict[str, Any] = Field(default_factory=dict)
+    items: list[WorkItem] = Field(default_factory=list)
+
+
+class LaneResult(BaseModel):
+    """Lane -> gather (MAF fan-in): the items this lane processed, with findings/errors."""
+
+    run_id: str
+    lane: str
+    base: StepMessage
+    planner: dict[str, Any] = Field(default_factory=dict)
+    items: list[WorkItem] = Field(default_factory=list)
+    seconds: float = 0.0

@@ -4,7 +4,7 @@
 # output: <step id>  -> workflow result is only that step's output (omit = full step report)
 workflows:
   material_pipeline:
-    description: "material JSON (incl. CIFs) -> scraper (tool_finder -> tools) -> judge -> NL summary"
+    description: "material JSON (incl. CIFs) -> tool_finder => parallel lanes (MOFid | CIF->SMILES->PubChem | sequence->PDB) => judge (agentic) -> report"
     pattern: router
     steps:
       - {id: preprocess, type: preprocess}                               # save full JSON -> temp/<uuid>.json
@@ -19,6 +19,12 @@ workflows:
       - {id: judge, type: judge, agent: judge}                           # evidence -> summary
     router: tool_finder
     tools: [cif_to_smiles, pubchem, pubchem_safety, mofid, cif_to_seq, pdb_lookup]   # executors the router may chain; describe them in skills/tool-finder
+    lanes:                            # parallel lanes (MAF fan-out/fan-in); items inside a lane run concurrently
+      mof: [mofid]
+      molecule: [cif_to_smiles, pubchem, pubchem_safety]
+      protein: [cif_to_seq, pdb_lookup]
+    max_concurrency: 4                # subsystems processed at once per lane
+    tool_timeout: 300                 # seconds per tool call before it is recorded as failed
     gather: scrape                    # gathered findings appear as step "scrape"
     output: judge
     output_field: report              # return only the markdown report (drop for the full JSON)

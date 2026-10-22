@@ -4,7 +4,10 @@ Input (JSON text; DevUI: one input box, CLI/API: a dict is serialized), any of:
   {"entry": "<NOMAD entry URL or entry_id>"}    -> fetched from the NOMAD API and converted (tools/nomad.py)
   "<NOMAD entry URL or entry_id>"               -> same, without the JSON wrapper
   {"systems": {...}, "cifs": {...}}             -> used as is
-Output : {"artifact_id", "path", "bytes", "source", "entry_id"?}
+Optional field (with entry or full JSON): "metainfo": true | false   (default true)
+  false -> before saving, every subsystem gets label, structural_type, building_block = null
+           (the pipeline then has to judge the material from formula/elements/CIFs alone)
+Output : {"artifact_id", "path", "bytes", "source", "metainfo", "entry_id"?}
 Saved via MAF FileSystemAgentFileStore (see core/artifacts.py). The artifact_id travels in
 StepMessage.task.params -> every later step uses `message.artifact_id`.
 
@@ -19,6 +22,7 @@ from typing import Any
 
 from agent_framework import WorkflowContext, handler
 
+from hackframe.core.material import system_meta
 from hackframe.core.schemas import StepMessage, TaskInput
 from hackframe.executors.base import EXECUTORS, BaseEntryExecutor
 from hackframe.tools import nomad
@@ -26,6 +30,24 @@ from hackframe.tools import nomad
 log = logging.getLogger(__name__)
 
 _ENTRY_KEYS = ("entry", "entry_id", "url")
+META_FIELDS = ("label", "structural_type", "building_block")  # nulled when metainfo is false
+
+
+def parse_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "0", "no", "off", "")
+    return bool(value)
+
+
+def strip_metainfo(data: dict[str, Any]) -> dict[str, Any]:
+    """Set META_FIELDS to null in every subsystem (nested `metadata` or flat layout)."""
+    for entry in (data.get("systems") or {}).values():
+        meta = system_meta(entry)
+        for field in META_FIELDS:
+            meta[field] = None
+    return data
 
 
 @EXECUTORS.register("preprocess")
@@ -55,6 +77,7 @@ class PreprocessExecutor(BaseEntryExecutor):
             data = stripped  # bare URL / entry id
 
         source = "json"
+        metainfo = parse_bool(data.pop("metainfo", None)) if isinstance(data, dict) else True
         if isinstance(data, str):
             data, source = await self.fetch_entry(data), "nomad"
         elif isinstance(data, dict) and "systems" not in data and (ref := next((data[k] for k in _ENTRY_KEYS if data.get(k)), None)):
@@ -63,8 +86,11 @@ class PreprocessExecutor(BaseEntryExecutor):
             raise ValueError("input must be a non-empty JSON object, or {\"entry\": \"<NOMAD URL or entry_id>\"}")
         if self.artifacts is None:
             raise RuntimeError("no artifact store configured")
+        if not metainfo:
+            strip_metainfo(data)
+            log.info("[%s] metainfo=false: %s set to null in all subsystems", self.id, ", ".join(META_FIELDS))
         artifact_id = await self.artifacts.save(data)
-        params = {"artifact_id": artifact_id, "source": source}
+        params = {"artifact_id": artifact_id, "source": source, "metainfo": metainfo}
         if data.get("entry_id"):
             params["entry_id"] = data["entry_id"]
         return TaskInput(task=f"material {artifact_id}", params=params)
@@ -73,7 +99,8 @@ class PreprocessExecutor(BaseEntryExecutor):
         aid = message.artifact_id
         path = self.artifacts.path(aid)
         log.info("[%s] saved %s", self.id, path)
-        out = {"artifact_id": aid, "path": str(path), "bytes": path.stat().st_size, "source": message.task.params.get("source")}
+        out = {"artifact_id": aid, "path": str(path), "bytes": path.stat().st_size, "source": message.task.params.get("source"),
+               "metainfo": message.task.params.get("metainfo", True)}
         if entry := message.task.params.get("entry_id"):
             out["entry_id"] = entry
         return out
