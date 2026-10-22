@@ -13,9 +13,12 @@ workflows:
       - {id: cif_to_smiles, type: cif_to_smiles, tolerance: 1.3}         # tool: CIF -> SMILES
       - {id: pubchem, type: pubchem_mcp, agent: pubchem, max_fragments: 3}  # tool: SMILES -> PubChem via MCP (agentic)
       - {id: pubchem_safety, type: pubchem_safety}                       # tool: CID -> hazards, uses, vendors
+      - {id: mofid, type: mofid, timeout: 600}                           # tool: MOF CIF -> MOFid (nodes, linkers, topology)
+      - {id: cif_to_seq, type: cif_to_seq}                               # tool: protein CIF -> amino acid sequence
+      - {id: pdb_lookup, type: pdb_lookup, identity_cutoff: 0.9}         # tool: sequence -> most similar RCSB PDB entry
       - {id: judge, type: judge, agent: judge}                           # evidence -> summary
     router: tool_finder
-    tools: [cif_to_smiles, pubchem, pubchem_safety]   # executors the router may chain; describe them in skills/tool-finder
+    tools: [cif_to_smiles, pubchem, pubchem_safety, mofid, cif_to_seq, pdb_lookup]   # executors the router may chain; describe them in skills/tool-finder
     gather: scrape                    # gathered findings appear as step "scrape"
     output: judge
     output_field: report              # return only the markdown report (drop for the full JSON)

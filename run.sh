@@ -5,6 +5,7 @@
 #   ./run.sh up       docker services (LiteLLM, Postgres, Aspire) + wait until ready
 #   ./run.sh devui    start DevUI only
 #   ./run.sh down     stop docker services
+#   ./run.sh mofid    install SingularityCE + download mofid.sif into external/
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -62,6 +63,8 @@ up() {
 
 devui() {
   activate
+  command -v singularity >/dev/null || warn "singularity missing - MOF route will fail (./run.sh mofid)"
+  [ -f external/mofid.sif ] || grep -qs '^MOFID_SIF=/' .env || warn "external/mofid.sif missing - MOF route will fail (./run.sh mofid)"
   say "DevUI  http://localhost:${DEVUI_PORT:-8080}   (Ctrl+C to stop)"
   python -m hackframe devui
 }
@@ -77,6 +80,7 @@ case "${1:-all}" in
   up)    up ;;
   devui) devui ;;
   down)  down ;;
+  mofid) bash scripts/setup_mofid.sh ;;
   all)   setup; up; devui ;;
-  *)     die "usage: ./run.sh [all|setup|up|devui|down]" ;;
+  *)     die "usage: ./run.sh [all|setup|up|devui|down|mofid]" ;;
 esac

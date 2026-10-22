@@ -36,7 +36,11 @@ def test_hu_provider_is_rate_limited_and_shared(rt: Runtime) -> None:
 
 
 async def test_skills_parsed_by_maf(rt: Runtime) -> None:
-    assert rt.skills.available() == ["judge", "pubchem-scrape", "tool-finder"]
+    assert rt.skills.available() == [
+        "generic-system-analysis", "judge", "mof-analysis", "protein-chain-sequence", "pubchem-scrape", "tool-finder",
+    ]
     meta = await rt.skills.metadata("tool-finder")
-    assert meta == {"fallback_structural_types": "molecule", "fallback_tools": "cif_to_smiles,pubchem,pubchem_safety"}
+    assert meta["fallback_tools"] == "cif_to_smiles,pubchem,pubchem_safety"
+    assert meta["route_mof_tools"] == "mofid"
+    assert meta["route_protein_tools"] == "cif_to_seq,pdb_lookup"
     assert "Tool finder" in await rt.skills.content("tool-finder")

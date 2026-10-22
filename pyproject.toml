@@ -16,6 +16,9 @@ dependencies = [
     "requests>=2.31",  # NOMAD client
     "ase>=3.23",
     "rdkit>=2024.3",
+    "openbabel-wheel>=3.1",  # protein CIF -> PDB -> sequence
+    "biopython>=1.83",
+    "scipy>=1.11",
     # BioContext PubChem MCP server (not on PyPI); pinned to the tested commit
     "pubchem-mcp @ git+https://github.com/BioContext/PubChem-MCP.git@3895180",
 ]

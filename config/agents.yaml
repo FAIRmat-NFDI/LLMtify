@@ -11,7 +11,7 @@ agents:
     model: hu            # alternatives: hu_think | hu_direct | mini
     instructions: |
       You plan which tools run on which subsystem of a material. Reply only with the requested JSON plan.
-    ground_skills: [tool-finder]
+    ground_skills: [tool-finder, mof-analysis, protein-chain-sequence, generic-system-analysis]
 
   pubchem:
     description: Identifies SMILES fragments in PubChem using the PubChem MCP server
@@ -26,4 +26,4 @@ agents:
     model: hu            # alternatives: hu_think | hu_direct | mini
     instructions: |
       You are a materials-science editor. Summarise only facts present in the evidence.
-    ground_skills: [judge]
+    ground_skills: [judge, generic-system-analysis]

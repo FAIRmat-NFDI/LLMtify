@@ -7,8 +7,9 @@ metadata:
 
 # Judge
 
-You receive EVIDENCE: every subsystem (`systems`) and the identified `components`
-(PubChem results per molecule subsystem). Produce:
+You receive EVIDENCE: `material_class` + `class_reason` (decided by the tool finder), every subsystem
+(`systems`), the identified `components` (PubChem results per molecule subsystem) and `tool_summaries`
+(per-subsystem results of `mofid`, `cif_to_seq`, `pdb_lookup`, ...). Produce:
 - `summary`: one short paragraph a scientist can paste into a report;
 - `subsystems`: one row per entry in `systems`, same order, with a short `description`;
 - `key_facts`: the individual facts you used.
@@ -27,6 +28,19 @@ You receive EVIDENCE: every subsystem (`systems`) and the identified `components
 5. If an organic molecule subsystem was not identified (`identified: false`), say in one sentence that the
    organic component could not be identified in PubChem. Do not guess its name.
 
+## Per material class (add after the points above)
+
+- **mof** (`mofid` summary present): the MOF route uses MOFid only (no PubChem). Write from the MOFid JSON:
+  "The given system is a metal-organic framework (MOF)", the node(s) (`nodes` / `node_formulas`, e.g. Ag), the
+  organic linker(s) (`linker_formulas`, e.g. C38H28N4; name a linker only if you are certain from its SMILES),
+  the net topology (`topology`) and catenation. If `topology_failed` is true say the topology could not be
+  determined. Do not mention PubChem IDs, uses, vendors or hazards.
+- **protein** (`cif_to_seq` / `pdb_lookup` summaries): "The given system is a protein chain of N residues."
+  If `pdb_lookup` found an entry: the most similar PDB entry (`pdb_id`), its `description`, `organism` and,
+  if present, gene and UniProt accession. If nothing was found, say no similar PDB entry (>= 90 % identity) exists.
+  Do not report PubChem uses/vendors/hazards for proteins.
+- **other**: characterize from composition and hierarchy only (generic-system-analysis skill).
+
 ## Subsystem table: `description` per row
 
 | subsystem kind | description |
@@ -39,6 +53,8 @@ You receive EVIDENCE: every subsystem (`systems`) and the identified `components
 | metal molecule | "A representative <element> molecule (PubChem ID n)" |
 | organic molecule | "A representative organic molecule, <name> (PubChem ID n)" |
 | ligand molecule | "A representative of the ligand, <name> (PubChem ID n)" |
+
+| protein chain | "A protein chain of N residues, most similar to PDB <id> (<description>)" |
 
 Unidentified molecule: "A representative organic molecule (not identified in PubChem)".
 

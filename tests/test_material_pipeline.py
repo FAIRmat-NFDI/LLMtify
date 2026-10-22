@@ -1,5 +1,7 @@
-"""Full pipeline: preprocess -> compact -> tool_finder =switch=> cif_to_smiles -> pubchem => gather -> judge.
-LLM calls and PubChem are stubbed; CIF -> SMILES is real (ASE + RDKit)."""
+"""Full pipeline, molecular route: preprocess -> compact -> tool_finder =switch=> cif_to_smiles -> pubchem => gather -> judge.
+LLM calls and PubChem are stubbed; CIF -> SMILES is real (ASE + RDKit).
+The example is a MOF; here the tool finder is made to judge it `molecular` (autouse fixture) to exercise the
+CIF -> SMILES -> PubChem chain. The strict MOF / protein routes are tested in test_mof_protein.py."""
 
 import json
 from pathlib import Path
@@ -11,12 +13,20 @@ from hackframe.core.runtime import Runtime
 from hackframe.executors.judge import JudgeExecutor, MaterialSummary, SubsystemRow
 from hackframe.executors.tool_finder import SystemPlan, ToolFinderExecutor, ToolPlan
 from hackframe.executors.tools_chem import PubChemMCPExecutor, PubChemSafetyExecutor
+from hackframe.executors.tools_mof_protein import MOFidExecutor
+from hackframe.tools.mofid import MOFid
 from hackframe.settings import Settings
 from hackframe.tools.pubchem import CompoundDetails, PubChemCompound, PubChemResult
 
 EXAMPLE_PATH = Path(__file__).parent.parent / "examples" / "material_example.json"
 EXAMPLE = json.loads(EXAMPLE_PATH.read_text())
 AG = "results/material/topology/3"
+ROOT = "results/material/topology/0"
+MOFID_OUT = json.loads((Path(__file__).parent / "data" / "mofid_output.json").read_text())  # real MOFid run on the root CIF
+
+
+def fake_mofid(cif, timeout=600):
+    return {**MOFID_OUT, "mofid_parsed": MOFid.parse(MOFID_OUT["mofid"]).model_dump()}
 
 
 PROMPTS: list[str] = []
@@ -62,6 +72,19 @@ def install_fakes(monkeypatch) -> None:
     monkeypatch.setattr(PubChemMCPExecutor, "mcp_details", fake_mcp_details)
     monkeypatch.setattr(PubChemMCPExecutor, "ask_agent", fake_mcp_agent)
     monkeypatch.setattr(PubChemSafetyExecutor, "client", FakeSafety())
+    monkeypatch.setattr(MOFidExecutor, "run_mofid", staticmethod(fake_mofid))
+
+
+_ORIG_FALLBACK = ToolFinderExecutor.fallback
+
+
+@pytest.fixture(autouse=True)
+def molecular_route(monkeypatch) -> None:
+    """Fallback class decision sees no 'MOF' label -> molecular route (CIF -> SMILES -> PubChem)."""
+    async def fallback(self, systems):
+        return await _ORIG_FALLBACK(self, [{**x, "label": "framework" if x["label"] == "MOF" else x["label"]} for x in systems])
+
+    monkeypatch.setattr(ToolFinderExecutor, "fallback", fallback)
 
 
 @pytest.fixture
@@ -87,7 +110,7 @@ async def test_llm_plan_routes_tools_and_judge_summarises(rt: Runtime, monkeypat
     async def plan(self, systems):
         seen["systems"] = systems
         seen["tools"] = self.tools
-        return ToolPlan(plans=[
+        return ToolPlan(material_class="molecular", class_reason="test: molecular route", plans=[
             SystemPlan(system=AG, tools=["cif_to_smiles", "pubchem", "pubchem_safety", "made_up_tool"], reason="metal node"),
             SystemPlan(system="results/material/topology/1", tools=[], reason="bulk"),
         ])
@@ -106,7 +129,7 @@ async def test_llm_plan_routes_tools_and_judge_summarises(rt: Runtime, monkeypat
     out = await rt.run_workflow("material_pipeline", EXAMPLE)
 
     assert out["generated_by"] == "llm" and "PubChem ID 23954" in out["summary"]
-    assert set(seen["tools"]) == {"cif_to_smiles", "pubchem", "pubchem_safety"}   # builder injected tool list
+    assert set(seen["tools"]) == {"cif_to_smiles", "pubchem", "pubchem_safety", "mofid", "cif_to_seq", "pdb_lookup"}   # builder injected tool list
     assert {s["system"]: s["has_cif"] for s in seen["systems"]}[AG] is True
     comp = seen["evidence"]["components"]
     assert [c["system"] for c in comp] == [AG]                                     # only planned subsystem
@@ -124,6 +147,7 @@ async def test_fallbacks_when_llm_is_down(rt: Runtime, monkeypatch) -> None:
     assert out["summary"].startswith("The given system is a MOF containing Silver (PubChem ID 23954)")
     planned = [c["system"] for c in out["evidence"]["components"]]
     assert planned == [AG, "results/material/topology/5"]  # skill metadata: molecule subsystems with a CIF
+    assert out["evidence"]["material_class"] == "molecular"
 
 
 async def test_full_json_saved_and_cif_resolvable(rt: Runtime, monkeypatch) -> None:
@@ -252,7 +276,7 @@ async def test_markdown_report_is_the_workflow_output(tmp_path: Path, monkeypatc
 
 async def test_llm_rows_fill_gaps_from_template(rt: Runtime, monkeypatch) -> None:
     async def plan(self, systems):
-        return ToolPlan(plans=[SystemPlan(system=AG, tools=["cif_to_smiles", "pubchem"], reason="metal")])
+        return ToolPlan(material_class="molecular", class_reason="test: molecular route", plans=[SystemPlan(system=AG, tools=["cif_to_smiles", "pubchem"], reason="metal")])
 
     async def judge(self, evidence):  # LLM returns only one row
         return MaterialSummary(summary="S.", subsystems=[SubsystemRow(system=AG, description="Ag row from LLM")], key_facts=[])
@@ -294,6 +318,12 @@ async def test_mcp_details_failure_keeps_rest_data(rt: Runtime, monkeypatch) -> 
     assert hit["cid"] == 23954 and hit["name"] == "Silver" and "MCP details unavailable" in hit["note"]
 
 
+def canon(smiles):
+    from rdkit import Chem
+    mol = Chem.MolFromSmiles(smiles)
+    return Chem.MolToSmiles(mol) if mol else smiles
+
+
 LINKER = "N#Cc1ccc(C23CC4(c5ccc(C#N)cc5)CC(c5ccc(C#N)cc5)(C2)CC(c2ccc(C#N)cc2)(C3)C4)cc1"
 
 
@@ -305,7 +335,7 @@ async def test_flat_layout_bonded_smiles_identifies_linker(rt: Runtime, monkeypa
 
     async def lookup(self, smiles, include_synonyms=True, max_synonyms=5):
         looked_up.append(smiles)
-        if smiles == LINKER:
+        if canon(smiles) == canon(LINKER):  # PubChem matches structures, not strings (MOFid writes another SMILES)
             return PubChemResult(query_smiles=smiles, found=True, synonyms=["Linker A"],
                                  compound=PubChemCompound(cid=777, molecular_formula="C38H28N4", url="u"))
         return await orig(self, smiles, include_synonyms, max_synonyms)

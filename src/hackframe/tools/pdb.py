@@ -1,4 +1,7 @@
+"""RCSB PDB lookup by amino acid sequence (domain team's code) + a compact summary for the judge."""
+
 import json
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -6,6 +9,7 @@ import requests
 from hackframe.tools.builtin import register_tool
 
 PROTEIN_URL = "https://data.rcsb.org/graphql"
+TIMEOUT = 60
 
 GRAPH_QUERY = """
 query structure($id: String!) {
@@ -50,28 +54,11 @@ query structure($id: String!) {
 }
 """
 
+
 def query_PDB_by_sequence(sequence: str, identity_cutoff=0.9) -> dict:
-    """Search PDB for polymer entities matching a protein sequence.
+    """Search PDB for polymer entities matching a protein sequence (RCSB Search API, BLAST-based).
 
-    Queries the RCSB Search API via sequence similarity (BLAST-based).
-
-    Parameters
-    ----------
-    sequence : str
-        Amino acid sequence in one-letter code.
-    identity_cutoff : float, optional
-        Minimum sequence identity threshold (0–1). Default is 0.9.
-
-    Returns
-    -------
-    dict
-        Raw JSON response from the search API, containing ``result_set``
-        with ranked hits and alignment metadata.
-
-    Notes
-    -----
-    Returns up to 25 experimental structures sorted by combined score.
-    For large-scale retrieval, paginate via ``request_options.paginate``.
+    Returns the raw JSON response, containing ``result_set`` with ranked hits.
     """
     query = {
         "query": {
@@ -92,82 +79,68 @@ def query_PDB_by_sequence(sequence: str, identity_cutoff=0.9) -> dict:
             "scoring_strategy": "combined"
         }
     }
-    
+
     json_str = json.dumps(query, separators=(',', ':'))
     url = f"https://search.rcsb.org/rcsbsearch/v2/query?json={quote(json_str, safe='')}"
-    
-    response = requests.get(url)
-    result = response.json()
-    return result
+
+    response = requests.get(url, timeout=TIMEOUT)
+    if response.status_code == 204:  # no hits
+        return {"result_set": []}
+    response.raise_for_status()
+    return response.json()
 
 
 def lookup_protein_data(protein_id: str):
-    """Retrieve comprehensive structural and functional metadata for a PDB entry.
-
-    Fetches via the RCSB Data API using the module-level ``GRAPH_QUERY``.
-
-    Parameters
-    ----------
-    protein_id : str
-        PDB identifier, e.g. ``"1CBS"``.
-
-    Returns
-    -------
-    dict
-        JSON response with nested entry, polymer entity, citation,
-        UniProt cross-references, EC classification, and ligand data.
-
-    Raises
-    ------
-    requests.HTTPError
-        On non-2xx status codes (not explicitly handled here).
-
-    See Also
-    --------
-    GRAPH_QUERY : GraphQL query string defining the returned data shape.
-    """
+    """Structural and functional metadata for a PDB entry (RCSB Data API, GRAPH_QUERY)."""
     variables = {"id": protein_id}
-    
+
     response = requests.post(
         PROTEIN_URL,
         json={"query": GRAPH_QUERY, "variables": variables},
-        headers={"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json"},
+        timeout=TIMEOUT,
     )
-
+    response.raise_for_status()
     return response.json()
+
 
 @register_tool("PDB_sequence_lookup")
 def query_most_similar_protein_from_PDB(sequence: str) -> dict:
-    """Return full metadata for the PDB entry most similar to the given sequence.
-
-    Convenience wrapper: executes sequence search, takes the top hit,
-    strips the chain suffix from the polymer entity identifier, and
-    resolves the corresponding entry via ``lookup_protein_data``.
-
-    Parameters
-    ----------
-    sequence : str
-        Query amino acid sequence.
-
-    Returns
-    -------
-    dict
-        ``lookup_protein_data`` result for the best-matching PDB entry.
-
-    Raises
-    ------
-    IndexError
-        If the sequence search returns an empty ``result_set``.
-    KeyError
-        If the response structure deviates from the expected schema.
-
-    Examples
-    --------
-    >>> data = query_most_similar_protein("MTEYKLVVVGAGGVGKSALTIQLIQNHFVDEYDPTIEDSYRKQVVIDGET")
-    >>> data["data"]["entry"]["rcsb_id"]
-    '6B41'
-    """
+    """Return full metadata for the PDB entry most similar to the given amino acid sequence."""
     ids_dict = query_PDB_by_sequence(sequence)
     id_ = ids_dict['result_set'][0]['identifier'].split('_')[0]
     protein_data = lookup_protein_data(id_)
     return protein_data
+
+
+def summarize_entry(data: dict, hit: dict | None = None) -> dict[str, Any]:
+    """Small, judge-friendly view of lookup_protein_data()'s answer."""
+    entry = (data.get("data") or {}).get("entry") or {}
+    entities = entry.get("polymer_entities") or []
+    descriptions, organisms, uniprots, ecs, genes = [], [], [], [], []
+    for ent in entities:
+        if d := (ent.get("rcsb_polymer_entity") or {}).get("pdbx_description"):
+            descriptions.append(d)
+        if ec := (ent.get("rcsb_polymer_entity") or {}).get("pdbx_ec"):
+            ecs.append(ec)
+        for org in ent.get("rcsb_entity_source_organism") or []:
+            if name := org.get("ncbi_scientific_name") or org.get("scientific_name"):
+                organisms.append(name)
+            genes += [g["value"] for g in org.get("rcsb_gene_name") or [] if g.get("value")]
+        uniprots += [u["rcsb_id"] for u in ent.get("uniprots") or [] if u.get("rcsb_id")]
+    citation = next(iter(entry.get("citation") or []), {}) or {}
+    uniq = lambda xs: list(dict.fromkeys(xs))  # noqa: E731
+    out = {
+        "pdb_id": entry.get("rcsb_id"),
+        "description": uniq(descriptions)[:3],
+        "organism": uniq(organisms)[:3],
+        "gene": uniq(genes)[:3],
+        "uniprot": uniq(uniprots)[:3],
+        "ec": uniq(ecs)[:3],
+        "citation": {k: citation.get(k) for k in ("title", "year", "pdbx_database_id_DOI") if citation.get(k)},
+        "url": f"https://www.rcsb.org/structure/{entry.get('rcsb_id')}" if entry.get("rcsb_id") else None,
+    }
+    if hit:
+        out["matched_entity"] = hit.get("identifier")
+        out["score"] = hit.get("score")
+    return {k: v for k, v in out.items() if v not in (None, [], {})}

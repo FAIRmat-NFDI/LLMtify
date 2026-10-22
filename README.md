@@ -230,8 +230,28 @@ JSON ─▶ preprocess ─▶ compact ─▶ tool_finder ══(switch-case on W
 | `cif_to_smiles` | `executors/tools_chem.py` | tool: CIF → SMILES via `tools/descriptors.py` (ASE + RDKit) |
 | `pubchem` | `executors/tools_chem.py` (`pubchem_mcp`) | tool: SMILES → CID by exact structure match, then name/formula/synonyms from the **BioContext PubChem MCP**; no match → LLM + MCP name search (skill `pubchem-scrape`) |
 | `pubchem_safety` | `executors/tools_chem.py` | tool: CID → GHS pictograms, industry uses, vendor count (PUG-View; not offered by the MCP server) |
+| `mofid` | `executors/tools_mof_protein.py` | tool (MOF): periodic root CIF → MOFid (nodes, linkers, topology) via `singularity run mofid.sif`; linker/node SMILES go on to `pubchem` |
+| `cif_to_seq` | `executors/tools_mof_protein.py` | tool (protein): chain CIF → amino acid sequence (Open Babel + Biopython, topology fallback) |
+| `pdb_lookup` | `executors/tools_mof_protein.py` | tool (protein): sequence → most similar RCSB PDB entry (≥ 90 % identity): description, organism, UniProt |
 | `scrape` | `executors/routing.py` (auto) | gathers all subsystem findings (MAF workflow state) |
 | `judge` | `executors/judge.py` | LLM grounded on `skills/judge` writes the summary from the evidence |
+
+### Material class → route (decided by the tool_finder LLM)
+
+The tool finder first judges `material_class` (`mof | protein | molecular | other`, with `class_reason`), grounded
+on the skills `tool-finder`, `mof-analysis`, `protein-chain-sequence`, `generic-system-analysis`:
+
+| class | route | judge adds |
+|---|---|---|
+| mof | root only → `mofid` → judge (no CIF→SMILES / PubChem) | nodes, linkers (+ formulas), topology (never guessed), MOFkey |
+| protein | chain only → `cif_to_seq` → `pdb_lookup` → judge (no CIF→SMILES / PubChem) | residue count, PDB entry, organism |
+| molecular / other | molecule subsystems → `cif_to_smiles` → `pubchem` → `pubchem_safety` | composition, compounds |
+
+MOFid setup (once): `./run.sh mofid` installs SingularityCE 4.6 (Ubuntu 24.04 .deb) and downloads `external/mofid.sif`
+(`MOFID_SIF` in `.env`; also searched: `external/`, `~/Downloads/`, `~/`).
+The MOF and protein routes are **strict**: the LLM judges the class, then `enforce_route` takes the tools from the
+skill metadata `route_mof_tools` / `route_protein_tools`, whatever else the LLM planned. Inside Docker/containers, `--userns` is retried automatically; extra flags go in
+`MOFID_SINGULARITY_FLAGS`. If MOFid is missing, the `mofid` step reports an error and the judge still runs.
 
 Routing is MAF-native: the router sets `WorkItem.plan`, and `add_switch_case_edge_group` sends each item to the
 tool named by `next_tool` (or to `scrape` when the chain is done). LLM calls per run: tool_finder 1, judge 1,
@@ -239,7 +259,9 @@ pubchem about 2–4 per molecule subsystem (tool-calling loop).
 
 **Domain experts edit skills, not code:**
 - `skills/tool-finder/SKILL.md`: which subsystems to process and with which tools. `metadata:` holds the fallback
-  rule used if the LLM is unreachable (`fallback_structural_types`, `fallback_tools`).
+  rules used if the LLM is unreachable (`fallback_mof_labels/_tools`, `fallback_protein_labels/_tools`,
+  `fallback_structural_types`, `fallback_tools`).
+- `skills/mof-analysis`, `skills/protein-chain-sequence`, `skills/generic-system-analysis`: domain knowledge per class.
 - `skills/judge/SKILL.md`: what the summary says and in which order.
 
 **Add a tool** (e.g. `element_lookup`):

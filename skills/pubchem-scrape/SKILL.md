@@ -26,7 +26,7 @@ Example: skeleton `NCC1CCC(C23CC4(...)...)CC1` with formula C38H28N4 -> adamanta
 
 ## Procedure, per fragment
 
-1. Read `bonded_smiles` if present (real bond orders: aromatic rings, nitriles), else `smiles_without_h`,
+1. Read `bonded_smiles` if present (MOFid linker/node SMILES are already bonded) (real bond orders: aromatic rings, nitriles), else `smiles_without_h`,
    plus the subsystem formula.
 2. Propose a name:
    - single atom like `[Ag]`, `[Cu]`, `[Zn]` -> the element name ("silver", "copper", "zinc");

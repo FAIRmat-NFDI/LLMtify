@@ -96,7 +96,7 @@ async def test_pipeline_from_entry_url(tmp_path: Path, monkeypatch) -> None:
     report = await rt.run_workflow("material_pipeline", {"entry": url})
 
     assert fetched == ["abc123DEF456ghi"]
-    assert isinstance(report, str) and "Silver (PubChem ID 23954)" in report
+    assert isinstance(report, str) and "metal-organic framework (MOF)" in report   # strict MOF route: mofid -> judge
     assert "| topology/3 |" in report and "| topology/7 |" in report
     (saved,) = list(rt.artifacts.root.glob("*.json"))
     assert json.loads(saved.read_text())["entry_id"] == "abc123DEF456ghi"
@@ -111,5 +111,5 @@ async def test_bare_url_input_and_full_json_still_work(tmp_path: Path, monkeypat
     llm_down(monkeypatch)
     monkeypatch.setattr(nomad, "fetch_archive", lambda entry_id, client=None: make_archive())
     rt = Runtime(Settings(hackframe_temp_dir=tmp_path / "temp"))
-    assert "Silver (PubChem ID 23954)" in await rt.run_workflow("material_pipeline", "abc123DEF456ghi")
-    assert "Silver (PubChem ID 23954)" in await rt.run_workflow("material_pipeline", FLAT)
+    assert "MOFid identifies 1 node type(s) (Ag)" in await rt.run_workflow("material_pipeline", "abc123DEF456ghi")
+    assert "MOFid identifies 1 node type(s) (Ag)" in await rt.run_workflow("material_pipeline", FLAT)

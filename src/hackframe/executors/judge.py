@@ -119,9 +119,18 @@ class JudgeExecutor(BaseStepExecutor):
                     "smiles_fragments": fragments[:3],
                     "compounds": list(merged.values()),
                     "identified": bool(merged),
+                    # compact outputs of domain tools (mofid, cif_to_seq, pdb_lookup, ...)
+                    "tool_summaries": {t: f["summary"] for t, f in s["findings"].items()
+                                       if isinstance(f, dict) and isinstance(f.get("summary"), dict)},
                 }
             )
-        return {"systems": overview, "components": components}
+        planner = scrape.get("planner") or {}
+        return {
+            "material_class": planner.get("material_class"),
+            "class_reason": planner.get("class_reason"),
+            "systems": overview,
+            "components": components,
+        }
 
     async def ask_llm(self, evidence: dict[str, Any]) -> MaterialSummary:
         prompt = (
@@ -144,14 +153,27 @@ class JudgeExecutor(BaseStepExecutor):
             comp = by_system.get(s["system"])
             cpd = comp["compounds"][0] if comp and comp["compounds"] else None
             ident = f", {cpd['name']} (PubChem ID {cpd['cid']})" if cpd else ""
-            if s.get("system_relation") == "root" or stype == "bulk":
+            tools = (comp or {}).get("tool_summaries", {})
+            seq = next((t for t in tools.values() if "length" in t and "sequence" in t), None)
+            pdb = next((t for t in tools.values() if t.get("pdb_id")), None)
+            if seq:
+                text = f"A protein chain of {seq['length']} residues"
+                if pdb:
+                    desc = ", ".join(pdb.get("description", [])[:1])
+                    text += f", most similar to PDB {pdb['pdb_id']}" + (f" ({desc})" if desc else "")
+            elif s.get("system_relation") == "root" or stype == "bulk":
                 text = "The original system"
             elif stype == "group":
                 kind = "metal atoms" if "metal" in label else "ligands" if "ligand" in label else "organic molecules"
                 text = f"The group of all {kind} in the system"
             elif stype == "molecule":
                 kind = "metal unit" if "metal" in label else "ligand" if "ligand" in label else "organic molecule"
-                text = f"A representative {kind}{ident}" if cpd else f"A representative {kind} (not identified in PubChem)"
+                if cpd:
+                    text = f"A representative {kind}{ident}"
+                elif comp:  # looked up, nothing found
+                    text = f"A representative {kind} (not identified in PubChem)"
+                else:       # not planned (strict MOF / protein route)
+                    text = f"A representative {kind}"
             else:
                 text = label or "Subsystem"
             rows.append(SubsystemRow(system=s["system"], description=text))
@@ -164,8 +186,13 @@ class JudgeExecutor(BaseStepExecutor):
         )
         compounds = list({c["cid"]: c for comp in evidence["components"] for c in comp["compounds"]}.values())
         rows = cls.template_rows(evidence)
+        extra, extra_facts = cls.domain_sentences(evidence)
         if not compounds:
-            return MaterialSummary(summary="No component could be identified in PubChem.", subsystems=rows, key_facts=[])
+            cls_text = {"mof": "a metal-organic framework (MOF)", "protein": "a protein"}.get(evidence.get("material_class") or "")
+            fallback = (f"The given system is {cls_text}; its analysis tool did not return a result."
+                        if cls_text else "No component could be identified in PubChem.")
+            summary = " ".join(extra) if extra else fallback
+            return MaterialSummary(summary=summary, subsystems=rows, key_facts=extra_facts)
         names = [f"{c.get('name', 'unknown')} (PubChem ID {c['cid']})" for c in compounds]
         head = f"The given system is a {framework} containing " if framework else "The given system contains "
         sentences = [head + (", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]) + "."]
@@ -183,7 +210,37 @@ class JudgeExecutor(BaseStepExecutor):
             if bits:
                 sentences.append(f"{c.get('name', c['cid'])}: {'; '.join(bits)}.")
                 facts += bits
-        return MaterialSummary(summary=" ".join(sentences), subsystems=rows, key_facts=facts)
+        return MaterialSummary(summary=" ".join(sentences + extra), subsystems=rows, key_facts=facts + extra_facts)
+
+    @staticmethod
+    def domain_sentences(evidence: dict[str, Any]) -> tuple[list[str], list[str]]:
+        """Sentences from domain-tool summaries (MOFid, protein sequence, PDB)."""
+        sentences, facts = [], []
+        for comp in evidence["components"]:
+            for tool, t in comp.get("tool_summaries", {}).items():
+                if "mofid" in t:
+                    nodes = ", ".join(t.get("node_formulas") or t.get("nodes") or []) or "none"
+                    linkers = ", ".join(t.get("linker_formulas") or t.get("linkers") or []) or "none"
+                    topo = (f"its net topology is {t['topology']}" if t.get("topology") and not t.get("topology_failed")
+                            else "MOFid could not determine its net topology")
+                    if t.get("catenation") is not None and not t.get("topology_failed"):
+                        topo += f" (catenation {t['catenation']})"
+                    sentences.insert(0, f"The given system is a metal-organic framework (MOF). MOFid identifies "
+                                        f"{len(t.get('nodes', []))} node type(s) ({nodes}) and "
+                                        f"{len(t.get('linkers', []))} organic linker type(s) ({linkers}); {topo}.")
+                    facts.append(f"MOFid: {t['mofid']}")
+                    if t.get("mofkey"):
+                        facts.append(f"MOFkey: {t['mofkey']}")
+                elif t.get("pdb_id"):
+                    desc = ", ".join(t.get("description", [])[:1]) or "a protein"
+                    org = ", ".join(t.get("organism", [])[:1])
+                    sentences.append(f"The chain is most similar to PDB entry {t['pdb_id']} ({desc}"
+                                     + (f", {org}" if org else "") + ").")
+                    facts.append(f"PDB {t['pdb_id']}")
+                elif "length" in t and "sequence" in t:
+                    sentences.insert(0, f"The given system is a protein chain of {t['length']} residues.")
+                    facts.append(f"sequence: {t['sequence']}")
+        return sentences, facts
 
     # ------------------------------------------------------------------ step
     async def process(self, message: StepMessage) -> dict[str, Any]:
