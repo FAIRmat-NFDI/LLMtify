@@ -1,28 +1,40 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "LLMtify"
+name = "hackframe"
 version = "0.1.0"
-description = "LLM agentic framework for identifying subsystems in complex materials"
-readme = "README.md"
-requires-python = ">=3.12"
+description = "OO agentic framework on Microsoft Agent Framework: config-driven agents, executors, skills, MCP, context providers, LiteLLM, OTel/Aspire, DevUI"
+requires-python = ">=3.11"
 dependencies = [
-    "nomad-lab>=1.3.17",
-    "rdkit>=2026.9.1",
-    "biopython>=1.88",
-    "gemmi>=0.7.5",
-    "nomad-lab>=1.3.17",
-    "slices>=2.0.12",
-    "xtal2txt @ git+https://github.com/lamalab-org/xtal2txt.git@c6cf9593596ce99f054f1ebbdc4346d7dbec99fb",
+    "agent-framework>=1.22.0",
+    "agent-framework-devui",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "mcp>=1.20,<2",  # PubChem-MCP uses FastMCP (removed in mcp 2.x)
+    "python-dotenv>=1.0",
+    "httpx>=0.27",
+    "ase>=3.23",
+    "rdkit>=2024.3",
+    # BioContext PubChem MCP server (not on PyPI); pinned to the tested commit
+    "pubchem-mcp @ git+https://github.com/BioContext/PubChem-MCP.git@3895180",
 ]
 
-[tool.uv]
-exclude-dependencies = [
-    "keras",
-]
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-exclude = ["tests*", "docs*"]
+[project.scripts]
+hackframe = "hackframe.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hackframe"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]

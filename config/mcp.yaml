@@ -1,0 +1,28 @@
+# MCP servers. transport: stdio (local/internal) | http (external, streamable HTTP)
+mcp_servers:
+  hello_local:
+    transport: stdio
+    command: python
+    args: ["-m", "hackframe.mcp.servers.hello_server"]
+    description: Internal demo MCP server (echo, add)
+    approval_mode: never_require
+    enabled: true
+
+  pubchem:
+    # BioContext PubChem MCP (https://github.com/BioContext/PubChem-MCP), installed via pyproject.
+    # Tools seen by the agent: pubchem_search_compound (by NAME only), pubchem_get_compound_details,
+    # pubchem_get_compound_properties
+    transport: stdio
+    command: python
+    args: ["-m", "mcp_server", "--stdio"]
+    description: PubChem compound search and details (external MCP server, runs as a local process)
+    approval_mode: never_require
+    allowed_tools: [search_compound, get_compound_details, get_compound_properties]
+    enabled: true
+
+  ms_learn:
+    transport: http
+    url: https://learn.microsoft.com/api/mcp
+    description: External MCP server - Microsoft Learn docs search
+    approval_mode: never_require
+    enabled: false

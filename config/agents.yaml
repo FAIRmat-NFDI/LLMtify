@@ -1,0 +1,29 @@
+# Agent specs. Every agent is the same `Agent` object type; only the spec differs.
+#   model:              profile from models.yaml (per-agent model choice)
+#   context_providers:  keys registered in hackframe.context.providers
+#   tools:              local function tools registered in hackframe.tools
+#   mcp:                server keys from mcp.yaml
+#   skills:             true -> MAF SkillsProvider (agent loads any skill on demand)
+#   ground_skills:      skill names always in the instructions (domain knowledge the agent must follow)
+agents:
+  tool_finder:
+    description: Agentic switch - picks the tool chain per subsystem
+    model: hu            # alternatives: hu_think | hu_direct | mini
+    instructions: |
+      You plan which tools run on which subsystem of a material. Reply only with the requested JSON plan.
+    ground_skills: [tool-finder]
+
+  pubchem:
+    description: Identifies SMILES fragments in PubChem using the PubChem MCP server
+    model: hu            # needs tool calling on the model server
+    instructions: |
+      You identify chemical fragments in PubChem using only the PubChem MCP tools. Never invent CIDs.
+    mcp: [pubchem]
+    ground_skills: [pubchem-scrape]
+
+  judge:
+    description: Writes the final natural-language material summary from gathered evidence
+    model: hu            # alternatives: hu_think | hu_direct | mini
+    instructions: |
+      You are a materials-science editor. Summarise only facts present in the evidence.
+    ground_skills: [judge]

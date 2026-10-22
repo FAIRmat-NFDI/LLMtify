@@ -1,0 +1,20 @@
+# Workflow specs. Every workflow is wrapped as:  intake -> <pattern> -> finalize
+# pattern: sequential | fan_out_in | graph | router   (see README)
+# An entry step (preprocess) must be first; it replaces intake and defines the input.
+# output: <step id>  -> workflow result is only that step's output (omit = full step report)
+workflows:
+  material_pipeline:
+    description: "material JSON (incl. CIFs) -> scraper (tool_finder -> tools) -> judge -> NL summary"
+    pattern: router
+    steps:
+      - {id: preprocess, type: preprocess}                               # save full JSON -> temp/<uuid>.json
+      - {id: compact, type: compact}                                     # small view, CIFs stay on disk
+      - {id: tool_finder, type: tool_finder, agent: tool_finder, skill: tool-finder}   # agentic switch
+      - {id: cif_to_smiles, type: cif_to_smiles, tolerance: 1.3}         # tool: CIF -> SMILES
+      - {id: pubchem, type: pubchem_mcp, agent: pubchem, max_fragments: 3}  # tool: SMILES -> PubChem via MCP (agentic)
+      - {id: pubchem_safety, type: pubchem_safety}                       # tool: CID -> hazards, uses, vendors
+      - {id: judge, type: judge, agent: judge}                           # evidence -> summary
+    router: tool_finder
+    tools: [cif_to_smiles, pubchem, pubchem_safety]   # executors the router may chain; describe them in skills/tool-finder
+    gather: scrape                    # gathered findings appear as step "scrape"
+    output: judge
