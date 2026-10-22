@@ -16,6 +16,7 @@ def ase_to_rdkit(atoms, tolerance=1.3):
             r_cov = covalent_radii[atoms.numbers[i]] + covalent_radii[atoms.numbers[j]]
             if dist < tolerance * r_cov:
                 mol.AddBond(i, j, Chem.BondType.SINGLE)    
+    mol = Chem.RemoveHs(mol, implicitOnly=True)
     return mol.GetMol()
 
 def atoms_to_smiles(atoms):
