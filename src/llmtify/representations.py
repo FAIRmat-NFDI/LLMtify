@@ -14,7 +14,7 @@ def get_atoms(data):
     functional_type=data['results']['material'].get('functional_type',None)
     for i in data['results']['material']['topology']:
         metadata={'functional_type':functional_type}
-        for k in ['label','building_block','structural_type','method','parent_system','child_systems']:
+        for k in ['label','building_block','structural_type','method','parent_system','child_systems','chemical_formula_hill','elements','n_atoms']:
             try:
                 metadata[k]=i[k]
             except:
@@ -159,9 +159,13 @@ def build_tree(atoms_dict):
 def create_input(archive):
     atoms_dict = get_atoms(archive)
     cifs = {}
+    systems = {}
     for k, v in atoms_dict.items():
         cifs[f'{k}'] = atoms_to_cif_string(v['atoms'])
         v.pop('atoms')  # remove the Atoms object to save space
-    atoms_dict = {'systems': atoms_dict, 'cifs': cifs}
+        v['metadata']['has_cif'] = True 
+        systems[k] = v.pop('metadata')  # keep only the metadata
+         # keep only the metadata
+    atoms_dict = {'systems': systems, 'cifs': cifs}
     return atoms_dict
 
