@@ -17,6 +17,7 @@ from agent_framework import Agent
 from pydantic import BaseModel, Field
 
 from hackframe.core.config import StepSpec
+from hackframe.core.material import system_meta
 from hackframe.core.schemas import StepMessage, WorkItem
 from hackframe.executors.base import EXECUTORS, BuildContext, build_agent
 from hackframe.executors.routing import BaseRouterExecutor
@@ -67,7 +68,7 @@ class ToolFinderExecutor(BaseRouterExecutor):
         system_cif = small.get("system_cif", {})
         out = []
         for key, value in (small.get("systems") or {}).items():
-            meta = (value or {}).get("metadata", {}) if isinstance(value, dict) else {}
+            meta = system_meta(value)
             out.append(
                 {
                     "system": key,
@@ -77,6 +78,7 @@ class ToolFinderExecutor(BaseRouterExecutor):
                     "method": meta.get("method"),
                     "parent_system": meta.get("parent_system"),
                     "child_systems": meta.get("child_systems"),
+                    "formula": meta.get("chemical_formula_hill"),
                     "has_cif": key in system_cif,
                 }
             )
@@ -117,7 +119,7 @@ class ToolFinderExecutor(BaseRouterExecutor):
             planner = {"by": "fallback", "llm_error": f"{type(exc).__name__}: {exc}"[:300]}
 
         by_key = {s["system"]: s for s in systems}
-        meta = {k: (v or {}).get("metadata", {}) for k, v in (small.get("systems") or {}).items()}
+        meta = {k: system_meta(v) for k, v in (small.get("systems") or {}).items()}
         items, dropped, seen = [], [], set()
         for p in tool_plan.plans:
             if p.system not in by_key or p.system in seen:

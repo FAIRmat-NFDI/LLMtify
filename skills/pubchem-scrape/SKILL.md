@@ -1,9 +1,12 @@
 ---
 name: pubchem-scrape
-description: How to identify SMILES fragments in PubChem with the PubChem MCP tools (search is by name only).
+description: Fallback for SMILES fragments that had no exact PubChem structure match - identify them by name with the PubChem MCP tools.
 ---
 
 # PubChem scrape (via PubChem MCP)
+
+You only see fragments whose SMILES had **no exact structure match** in PubChem (exact matches are resolved
+automatically before you are called). Usually the skeleton lacks bond orders, so identify it by name.
 
 Tools (PubChem MCP server):
 - `pubchem_search_compound(query, max_results)`: search by **name** (common or IUPAC). It does NOT accept SMILES.
@@ -23,7 +26,8 @@ Example: skeleton `NCC1CCC(C23CC4(...)...)CC1` with formula C38H28N4 -> adamanta
 
 ## Procedure, per fragment
 
-1. Read `smiles_without_h` (easier to read than the full SMILES) and the subsystem formula.
+1. Read `bonded_smiles` if present (real bond orders: aromatic rings, nitriles), else `smiles_without_h`,
+   plus the subsystem formula.
 2. Propose a name:
    - single atom like `[Ag]`, `[Cu]`, `[Zn]` -> the element name ("silver", "copper", "zinc");
    - small or well-known molecules -> the common name;

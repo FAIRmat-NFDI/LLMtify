@@ -18,3 +18,4 @@ workflows:
     tools: [cif_to_smiles, pubchem, pubchem_safety]   # executors the router may chain; describe them in skills/tool-finder
     gather: scrape                    # gathered findings appear as step "scrape"
     output: judge
+    output_field: report              # return only the markdown report (drop for the full JSON)

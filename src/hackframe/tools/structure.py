@@ -1,19 +1,29 @@
-"""CIF text -> SMILES, using the domain team's descriptors.atoms_to_smiles (ASE + RDKit)."""
+"""CIF text -> SMILES, using the domain team's descriptors.ase_to_rdkit (ASE + RDKit).
+
+Two SMILES per fragment:
+  fragments / heavy_fragments : the domain converter's output (all bonds single), with / without explicit H
+  bonded_fragments            : same connectivity + bond orders from RDKit rdDetermineBonds
+                                (aromatic rings, C#N, C=O ...) - what PubChem needs for an exact match
+"""
 
 import io
+from collections import deque
 from typing import Any
 
+from ase import Atoms
+from ase.geometry import find_mic
 from ase.io import read
-from rdkit import Chem
+from rdkit import Chem, RDLogger
+from rdkit.Chem import rdDetermineBonds
 
 from hackframe.tools.descriptors import ase_to_rdkit
 
+RDLogger.DisableLog("rdApp.*")
 _H_ONLY = {"H", "[H]", "[HH]", "[H][H]"}
 
 
-def _heavy_atoms(smiles: str) -> int:
-    mol = Chem.MolFromSmiles(smiles, sanitize=False)
-    return sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() > 1) if mol else 0
+def _heavy_atoms(mol: Chem.Mol) -> int:
+    return sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() > 1)
 
 
 def _without_h(smiles: str) -> str:
@@ -28,17 +38,55 @@ def read_cell(cif_text: str) -> Any | None:
     return atoms.cell.copy() if atoms.cell.volume > 1e-6 else None
 
 
+def _unwrapped_positions(atoms: Atoms, skeleton: Chem.Mol) -> Any:
+    """Make every molecule whole in space (follow bonds across periodic images)."""
+    pos = atoms.positions.copy()
+    if not atoms.pbc.any():
+        return pos
+    seen: set[int] = set()
+    for start in range(len(atoms)):
+        if start in seen:
+            continue
+        seen.add(start)
+        queue = deque([start])
+        while queue:
+            i = queue.popleft()
+            for nb in skeleton.GetAtomWithIdx(i).GetNeighbors():
+                j = nb.GetIdx()
+                if j not in seen:
+                    vec, _ = find_mic(atoms.positions[j] - atoms.positions[i], atoms.cell, pbc=atoms.pbc)
+                    pos[j] = pos[i] + vec
+                    seen.add(j)
+                    queue.append(j)
+    return pos
+
+
+def _bond_orders(fragment: Chem.Mol) -> str | None:
+    """Same connectivity, bond orders perceived from 3D geometry (neutral molecule). None if it fails."""
+    if fragment.GetNumAtoms() < 2:
+        return Chem.MolToSmiles(fragment)
+    try:
+        mol = Chem.Mol(fragment)
+        for b in mol.GetBonds():
+            b.SetBondType(Chem.BondType.SINGLE)
+        rdDetermineBonds.DetermineBondOrders(mol, charge=0)
+        Chem.RemoveStereochemistry(mol)  # 3D-derived stereo tags would block exact matches
+        return Chem.MolToSmiles(Chem.RemoveHs(mol))
+    except Exception:  # metals, odd valences, radicals ...
+        return None
+
+
 def cif_to_smiles(
-    cif_text: str, tolerance: float = 1.3, max_atoms: int = 2000, cell: Any | None = None
+    cif_text: str, tolerance: float = 1.3, max_atoms: int = 2000, cell: Any | None = None, bond_orders: bool = True
 ) -> dict[str, Any]:
-    """Parse a CIF, bond atoms by covalent radii, return SMILES.
+    """Parse a CIF, bond atoms by covalent radii (descriptors.ase_to_rdkit), return SMILES.
 
     Returns:
-        smiles           : full SMILES (fragments joined by '.')
+        smiles           : full SMILES of the domain converter (fragments joined by '.')
         fragments        : unique fragments, largest first, pure-hydrogen fragments dropped
         heavy_fragments  : the same fragments without explicit H atoms (same order)
-        formula          : Hill formula from ASE
-        n_atoms          : atom count
+        bonded_fragments : the same fragments with perceived bond orders (same order; null where it failed)
+        formula, n_atoms : from ASE
         periodic         : True if bonds were found with periodic images (cell applied)
 
     `cell`: used when the CIF itself has no cell. Subsystem CIFs from the topology analysis are
@@ -51,15 +99,30 @@ def cif_to_smiles(
     if atoms.cell.volume < 1e-6 and cell is not None:
         atoms.set_cell(cell)
         atoms.set_pbc(True)
-    smiles = Chem.MolToSmiles(ase_to_rdkit(atoms, tolerance=tolerance))
-    fragments = sorted(
-        {f for f in smiles.split(".") if f and f not in _H_ONLY},
-        key=lambda f: (-_heavy_atoms(f), f),
-    )
+
+    skeleton = ase_to_rdkit(atoms, tolerance=tolerance)  # domain converter: connectivity, single bonds
+    smiles = Chem.MolToSmiles(skeleton)
+
+    mol = Chem.Mol(skeleton)
+    if bond_orders:
+        conf = Chem.Conformer(len(atoms))
+        for i, p in enumerate(_unwrapped_positions(atoms, skeleton)):
+            conf.SetAtomPosition(i, p.tolist())
+        mol.AddConformer(conf, assignId=True)
+
+    unique: dict[str, tuple[int, str | None]] = {}
+    for frag in Chem.GetMolFrags(mol, asMols=True, sanitizeFrags=False):
+        frag_smiles = Chem.MolToSmiles(frag)
+        if frag_smiles in _H_ONLY or frag_smiles in unique:
+            continue
+        unique[frag_smiles] = (_heavy_atoms(frag), _bond_orders(frag) if bond_orders else None)
+    ordered = sorted(unique, key=lambda f: (-unique[f][0], f))
+
     return {
         "smiles": smiles,
-        "fragments": fragments,
-        "heavy_fragments": [_without_h(f) for f in fragments],
+        "fragments": ordered,
+        "heavy_fragments": [_without_h(f) for f in ordered],
+        "bonded_fragments": [unique[f][1] for f in ordered],
         "formula": atoms.get_chemical_formula(mode="hill"),
         "n_atoms": len(atoms),
         "periodic": bool(atoms.pbc.any()),

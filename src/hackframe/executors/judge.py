@@ -1,10 +1,13 @@
-"""EXTIR_JUDGE: gathers every subsystem finding and writes the natural-language summary.
+"""EXTIR_JUDGE: gathers every subsystem finding and writes the report:
+a natural-language summary + a table describing every subsystem.
 An LLM grounded on the `judge` skill; only facts present in the evidence may be used.
 
 workflows.yaml:
   - {id: judge, type: judge, agent: judge, source: scrape, structure: compact}
 
-If the LLM call fails, a plain template summary is returned (generated_by: "fallback").
+Step output: {summary, subsystems, key_facts, report (markdown), generated_by, evidence}.
+With `output: judge` + `output_field: report` the workflow returns only the markdown report.
+If the LLM call fails, a deterministic template is used (generated_by: "fallback").
 """
 
 import json
@@ -15,6 +18,7 @@ from agent_framework import Agent
 from pydantic import BaseModel, Field
 
 from hackframe.core.config import StepSpec
+from hackframe.core.material import system_meta
 from hackframe.core.schemas import StepMessage
 from hackframe.executors.base import EXECUTORS, BaseStepExecutor, BuildContext, build_agent
 
@@ -26,9 +30,32 @@ _COMPOUND_KEYS = (
 )
 
 
+class SubsystemRow(BaseModel):
+    system: str = Field(..., description="Subsystem key exactly as in the evidence")
+    description: str = Field(..., description="One short phrase, e.g. 'The group of all Ag atoms in the system'")
+
+
 class MaterialSummary(BaseModel):
     summary: str = Field(..., description="The natural-language summary paragraph")
+    subsystems: list[SubsystemRow] = Field(..., description="One row per subsystem in the evidence, same order")
     key_facts: list[str] = Field(..., description="Short facts used, each traceable to the evidence")
+
+
+def short_key(system: str) -> str:
+    """'results/material/topology/5' -> 'topology/5'"""
+    return "/".join(system.split("/")[-2:])
+
+
+def _trim_uses(uses: list[str], n: int = 5, max_len: int = 60) -> list[str]:
+    """PubChem lists can hold dozens of long HSDB paragraphs; keep a few short category-like entries."""
+    short = [u for u in uses if len(u) <= max_len and "not known" not in u.lower() and u.lower() != "other"]
+    return short[:n]
+
+
+def render_report(summary: str, rows: list[SubsystemRow]) -> str:
+    lines = [summary.strip(), "", "| subsystem | description |", "|---|---|"]
+    lines += [f"| {short_key(r.system)} | {r.description.strip().replace('|', '/')} |" for r in rows]
+    return "\n".join(lines) + "\n"
 
 
 @EXECUTORS.register("judge")
@@ -57,15 +84,18 @@ class JudgeExecutor(BaseStepExecutor):
     def evidence(self, message: StepMessage) -> dict[str, Any]:
         small = message.output_of(self.structure)
         scrape = message.output_of(self.source)
-        overview = [
-            {
-                "system": k,
-                "label": (v or {}).get("metadata", {}).get("label"),
-                "structural_type": (v or {}).get("metadata", {}).get("structural_type"),
-                "system_relation": (v or {}).get("metadata", {}).get("system_relation"),
-            }
-            for k, v in (small.get("systems") or {}).items()
-        ]
+        overview = []
+        for k, v in (small.get("systems") or {}).items():
+            meta = system_meta(v)
+            overview.append(
+                {
+                    "system": k,
+                    "label": meta.get("label"),
+                    "structural_type": meta.get("structural_type"),
+                    "system_relation": meta.get("system_relation"),
+                    "parent_system": meta.get("parent_system"),
+                }
+            )
         components = []
         for s in scrape.get("systems", []):
             findings = [f for f in s["findings"].values() if isinstance(f, dict)]
@@ -75,6 +105,11 @@ class JudgeExecutor(BaseStepExecutor):
                     if c.get("found") and c.get("cid"):
                         entry = merged.setdefault(c["cid"], {"cid": c["cid"]})
                         entry.update({k: c[k] for k in _COMPOUND_KEYS if c.get(k) not in (None, [], "")})
+            for entry in merged.values():
+                if "industry_uses" in entry:
+                    entry["industry_uses"] = _trim_uses(entry["industry_uses"])
+                if "ghs_hazard_statements" in entry:
+                    entry["ghs_hazard_statements"] = entry["ghs_hazard_statements"][:4]
             fragments = next((f.get("heavy_fragments") or f["fragments"] for f in findings if "fragments" in f), [])
             components.append(
                 {
@@ -83,14 +118,14 @@ class JudgeExecutor(BaseStepExecutor):
                     "structural_type": s["structural_type"],
                     "smiles_fragments": fragments[:3],
                     "compounds": list(merged.values()),
-                    "errors": s["errors"],
+                    "identified": bool(merged),
                 }
             )
         return {"systems": overview, "components": components}
 
     async def ask_llm(self, evidence: dict[str, Any]) -> MaterialSummary:
         prompt = (
-            "Write the material summary following the judge skill. Use ONLY facts in this evidence.\n\n"
+            "Write the material report following the judge skill. Use ONLY facts in this evidence.\n\n"
             f"EVIDENCE:\n{json.dumps(evidence, indent=2)}"
         )
         response = await self.agent.run(prompt, options={"response_format": MaterialSummary})
@@ -98,24 +133,49 @@ class JudgeExecutor(BaseStepExecutor):
             raise ValueError(f"no structured summary from LLM; raw: {response.text[:300]}")
         return response.value
 
+    # ------------------------------------------------------------------ deterministic template
     @staticmethod
-    def template(evidence: dict[str, Any]) -> MaterialSummary:
-        """Deterministic summary used when the LLM is unavailable."""
+    def template_rows(evidence: dict[str, Any]) -> list[SubsystemRow]:
+        by_system = {c["system"]: c for c in evidence["components"]}
+        labels = {s["system"]: (s.get("label") or "") for s in evidence["systems"]}
+        rows = []
+        for s in evidence["systems"]:
+            label, stype = labels[s["system"]], s.get("structural_type")
+            comp = by_system.get(s["system"])
+            cpd = comp["compounds"][0] if comp and comp["compounds"] else None
+            ident = f", {cpd['name']} (PubChem ID {cpd['cid']})" if cpd else ""
+            if s.get("system_relation") == "root" or stype == "bulk":
+                text = "The original system"
+            elif stype == "group":
+                kind = "metal atoms" if "metal" in label else "ligands" if "ligand" in label else "organic molecules"
+                text = f"The group of all {kind} in the system"
+            elif stype == "molecule":
+                kind = "metal unit" if "metal" in label else "ligand" if "ligand" in label else "organic molecule"
+                text = f"A representative {kind}{ident}" if cpd else f"A representative {kind} (not identified in PubChem)"
+            else:
+                text = label or "Subsystem"
+            rows.append(SubsystemRow(system=s["system"], description=text))
+        return rows
+
+    @classmethod
+    def template(cls, evidence: dict[str, Any]) -> MaterialSummary:
         framework = next(
-            (s["label"] for s in evidence["systems"] if s.get("structural_type") == "bulk" and s.get("label")),
-            None,
+            (s["label"] for s in evidence["systems"] if s.get("structural_type") == "bulk" and s.get("label")), None
         )
-        compounds = {c["cid"]: c for comp in evidence["components"] for c in comp["compounds"]}.values()
+        compounds = list({c["cid"]: c for comp in evidence["components"] for c in comp["compounds"]}.values())
+        rows = cls.template_rows(evidence)
         if not compounds:
-            return MaterialSummary(summary="No component could be identified in PubChem.", key_facts=[])
+            return MaterialSummary(summary="No component could be identified in PubChem.", subsystems=rows, key_facts=[])
         names = [f"{c.get('name', 'unknown')} (PubChem ID {c['cid']})" for c in compounds]
         head = f"The given system is a {framework} containing " if framework else "The given system contains "
         sentences = [head + (", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]) + "."]
         facts = list(names)
         for c in compounds:
+            if c.get("formula", "").isalpha() and len(c.get("formula", "")) <= 2:  # element: no uses/hazards
+                continue
             bits = []
             if c.get("industry_uses"):
-                bits.append(f"industry use: {', '.join(c['industry_uses'])}")
+                bits.append(f"industry use: {', '.join(c['industry_uses'][:2])}")
             if c.get("vendor_count"):
                 bits.append(f"{c['vendor_count']} vendors")
             if c.get("ghs_pictograms"):
@@ -123,8 +183,9 @@ class JudgeExecutor(BaseStepExecutor):
             if bits:
                 sentences.append(f"{c.get('name', c['cid'])}: {'; '.join(bits)}.")
                 facts += bits
-        return MaterialSummary(summary=" ".join(sentences), key_facts=facts)
+        return MaterialSummary(summary=" ".join(sentences), subsystems=rows, key_facts=facts)
 
+    # ------------------------------------------------------------------ step
     async def process(self, message: StepMessage) -> dict[str, Any]:
         evidence = self.evidence(message)
         try:
@@ -132,4 +193,18 @@ class JudgeExecutor(BaseStepExecutor):
         except Exception as exc:
             log.warning("judge LLM failed (%s); using template", exc)
             result, by = self.template(evidence), "fallback"
-        return {**result.model_dump(), "generated_by": by, "evidence": evidence}
+
+        # every subsystem exactly once, in evidence order; fill gaps from the template
+        llm_rows = {r.system: r for r in result.subsystems}
+        rows = [llm_rows.get(t.system, t) for t in self.template_rows(evidence)]
+        scrape = message.output_of(self.source)
+        return {
+            "summary": result.summary,
+            "subsystems": [r.model_dump() for r in rows],
+            "key_facts": result.key_facts,
+            "report": render_report(result.summary, rows),
+            "generated_by": by,
+            "evidence": evidence,
+            # diagnostics only (kept out of the LLM evidence so the summary never talks about errors)
+            "errors": {s["system"]: s["errors"] for s in scrape.get("systems", []) if s["errors"]},
+        }

@@ -32,7 +32,10 @@ async def _run_workflow(
     else:
         raise SystemExit("give a task or --input '<json>'")
     out = await rt.run_workflow(name, payload)
-    print(out.model_dump_json(indent=2) if hasattr(out, "model_dump_json") else json.dumps(out, indent=2))
+    if isinstance(out, str):
+        print(out)  # e.g. a markdown report
+    else:
+        print(out.model_dump_json(indent=2) if hasattr(out, "model_dump_json") else json.dumps(out, indent=2))
 
 
 async def _run_agent(rt: Runtime, name: str, prompt: str) -> None:

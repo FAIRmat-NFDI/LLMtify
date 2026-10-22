@@ -228,7 +228,7 @@ JSON ─▶ preprocess ─▶ compact ─▶ tool_finder ══(switch-case on W
 | `compact` | `executors/compact.py` | small view without CIF bodies |
 | `tool_finder` | `executors/tool_finder.py` | **agentic switch**: LLM grounded on `skills/tool-finder` plans a tool chain per subsystem |
 | `cif_to_smiles` | `executors/tools_chem.py` | tool: CIF → SMILES via `tools/descriptors.py` (ASE + RDKit) |
-| `pubchem` | `executors/tools_chem.py` (`pubchem_mcp`) | tool, agentic: LLM + **BioContext PubChem MCP** (skill `pubchem-scrape`) → CID, name, formula, synonyms |
+| `pubchem` | `executors/tools_chem.py` (`pubchem_mcp`) | tool: SMILES → CID by exact structure match, then name/formula/synonyms from the **BioContext PubChem MCP**; no match → LLM + MCP name search (skill `pubchem-scrape`) |
 | `pubchem_safety` | `executors/tools_chem.py` | tool: CID → GHS pictograms, industry uses, vendor count (PUG-View; not offered by the MCP server) |
 | `scrape` | `executors/routing.py` (auto) | gathers all subsystem findings (MAF workflow state) |
 | `judge` | `executors/judge.py` | LLM grounded on `skills/judge` writes the summary from the evidence |
@@ -266,3 +266,23 @@ python -m hackframe run material_pipeline --input-file examples/material_example
 - Needs a model with tool calling (check HU vLLM). The answer is a JSON block, not `response_format`,
   so tool calls are not blocked by constrained decoding.
 - Proxy/CA env vars are passed through to the MCP process (`mcp/factory.py`).
+
+### Input layouts and SMILES
+
+- Both layouts work: `systems[k].metadata.{label,...}` with `cifs["<k>.cif"]`, or flat `systems[k].{label,...}`
+  with `cifs["<k>"]` (see `examples/material_example.json` and `examples/material_flat_example.json`).
+- `cif_to_smiles` returns the domain converter's SMILES (`fragments`, all single bonds) and
+  `bonded_fragments` (same connectivity + RDKit bond orders). PubChem lookup tries bonded → converter without H → converter.
+
+### Input from NOMAD
+
+The workflow input can be a NOMAD entry instead of the full JSON:
+
+```bash
+python -m hackframe run material_pipeline --input '{"entry": "https://nomad-lab.eu/prod/v1/gui/search/entries/entry/id/<entry_id>"}'
+python -m hackframe run material_pipeline --input '{"entry": "<entry_id>"}'
+```
+DevUI: paste `{"entry": "<url or entry_id>"}` (or just the URL) into the input box. `preprocess` fetches the archive
+(`tools/nomad.py`, NomadClient, `required_data`), converts `results.material.topology` + `run/system/atoms` into
+`{systems, cifs}` (root with cell, subsystems as Cartesian cut-outs, metres → Å) and stores it in `temp/<uuid>.json`.
+The full JSON input still works. API base: `NOMAD_BASE_URL` in `.env`.

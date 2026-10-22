@@ -18,6 +18,7 @@ Return, for every subsystem, the ordered list of tool ids to run (empty list = s
 - `structural_type: group` (e.g. `metal_sbu_1`, `organic_sbu_1`, `ligand_1`) -> a container of repeated units. Skip it;
   its `molecule` children carry the same chemistry once.
 - `structural_type: molecule` -> one building block (metal node, organic linker, ligand). These are the ones to identify.
+- Systems may also carry `formula` (Hill formula) - useful to tell metal units from organic ones.
 
 ## Rules
 

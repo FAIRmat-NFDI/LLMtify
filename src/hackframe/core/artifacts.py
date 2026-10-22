@@ -17,6 +17,8 @@ from typing import Any
 
 from agent_framework import FileSystemAgentFileStore
 
+from hackframe.core.material import cif_key
+
 warnings.filterwarnings("ignore", message=r".*FileSystemAgentFileStore is experimental.*")
 
 
@@ -50,8 +52,8 @@ class ArtifactStore:
     async def get_cif(self, artifact_id: str, key: str) -> str:
         """`key` with or without '.cif', e.g. 'results/material/topology/3'."""
         cifs = (await self.load(artifact_id)).get("cifs") or {}
-        name = key if key.endswith(".cif") else f"{key}.cif"
-        if name not in cifs:
+        name = cif_key(key.removesuffix(".cif"), cifs)
+        if name is None:
             raise ArtifactNotFound(f"cif '{key}' not in artifact {artifact_id}; have {sorted(cifs)}")
         return cifs[name]
 

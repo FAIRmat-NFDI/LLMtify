@@ -75,3 +75,13 @@ def test_parent_cell_joins_fragments_across_boundary() -> None:
     assert len(alone["fragments"]) > 1 and not alone["periodic"]
     assert joined["periodic"] and len(joined["heavy_fragments"]) == 1   # one linker molecule
     assert joined["formula"] == "C38H28N4"
+
+
+def test_bond_orders_give_real_molecule() -> None:
+    from hackframe.tools.structure import read_cell
+
+    out = cif_to_smiles(CIFS["results/material/topology/5.cif"], cell=read_cell(CIFS["results/material/topology/0.cif"]))
+    (bonded,) = out["bonded_fragments"]
+    assert "C#N" in bonded and "c1ccc" in bonded and "@" not in bonded  # aromatic + nitrile, no 3D stereo
+    assert out["heavy_fragments"][0].startswith("NCC1CCC")              # domain converter output unchanged
+    assert cif_to_smiles(CIFS["results/material/topology/3.cif"])["bonded_fragments"] == ["[Ag]"]

@@ -79,7 +79,9 @@ class Runtime:
                 await stack.enter_async_context(agent)
             yield wf
 
-    async def run_workflow(self, name: str, task: TaskInput | BaseModel | dict[str, Any]) -> FinalOutput | dict[str, Any]:
+    async def run_workflow(
+        self, name: str, task: TaskInput | BaseModel | dict[str, Any] | str
+    ) -> FinalOutput | dict[str, Any] | str:
         """`task` may be the workflow's input model, or a dict (validated unless the input is plain JSON).
         Returns FinalOutput, or the `output:` step's dict when the workflow sets one."""
         model = self.workflows.input_model(name)

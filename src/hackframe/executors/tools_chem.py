@@ -1,7 +1,7 @@
 """Scraper tools (router pattern). Each is an isolated executor that handles one WorkItem.
 
     cif_to_smiles   CIF (from temp/<uuid>.json) -> SMILES via descriptors.py (ASE + RDKit)
-    pubchem_mcp     SMILES -> PubChem compound, agentically via the BioContext PubChem MCP server
+    pubchem_mcp     SMILES -> CID (structure match) -> details via PubChem MCP; LLM name search as fallback
     pubchem_safety  CID -> GHS hazards, industry uses, vendor count (PUG-View; not in the MCP server)
 
 workflows.yaml:
@@ -20,6 +20,7 @@ from agent_framework import Agent
 from pydantic import BaseModel, Field
 
 from hackframe.core.config import StepSpec
+from hackframe.core.material import cif_key, system_meta
 from hackframe.core.schemas import WorkItem
 from hackframe.executors.base import EXECUTORS, BuildContext, build_agent
 from hackframe.executors.routing import BaseToolExecutor
@@ -35,7 +36,7 @@ class CifToSmilesExecutor(BaseToolExecutor):
     description = (
         "Convert the subsystem's CIF structure to SMILES (ASE + RDKit, bonds from covalent radii). "
         "Requires has_cif=true. Uses the parent crystal cell when the CIF has none. "
-        "Output: smiles, fragments, heavy_fragments (no explicit H), formula, n_atoms."
+        "Output: smiles, fragments, heavy_fragments (no explicit H), bonded_fragments (with bond orders), formula."
     )
 
     async def run_tool(self, item: WorkItem) -> dict[str, Any]:
@@ -51,6 +52,7 @@ class CifToSmilesExecutor(BaseToolExecutor):
             float(self.params.get("tolerance", 1.3)),
             int(self.params.get("max_atoms", 2000)),
             cell,
+            bool(self.params.get("bond_orders", True)),
         )
         return {**out, "cell_from": cell_from if out["periodic"] else None}
 
@@ -61,9 +63,10 @@ class CifToSmilesExecutor(BaseToolExecutor):
         key, seen = item.system, set()
         while key and key not in seen:
             seen.add(key)
-            if (cif := cifs.get(f"{key}.cif")) and (cell := await asyncio.to_thread(read_cell, cif)) is not None:
+            ck = cif_key(key, cifs)
+            if ck and (cell := await asyncio.to_thread(read_cell, cifs[ck])) is not None:
                 return cell, key
-            key = ((systems.get(key) or {}).get("metadata") or {}).get("parent_system")
+            key = system_meta(systems.get(key)).get("parent_system")
         return None, None
 
 
@@ -139,20 +142,24 @@ def normalize_findings(value: Any, queries: list[dict[str, str]]) -> PubChemFind
 
 @EXECUTORS.register("pubchem_mcp")
 class PubChemMCPExecutor(BaseToolExecutor):
-    """An agent with the PubChem MCP tools (agents.yaml `mcp: [pubchem]`) identifies each fragment.
+    """SMILES -> PubChem compound, per fragment:
 
-    The MCP server searches by NAME only, so the agent proposes names from the SMILES/formula,
-    calls search_compound, and checks the hit's formula. Guidance lives in skills/pubchem-scrape.
-    No response_format here: structured-output decoding can block tool calls on some servers (vLLM),
-    so the agent ends with a JSON block that is validated against PubChemFindings.
+    1. exact structure match SMILES -> CID (PubChem REST; the MCP server has no SMILES search)
+    2. CID -> name, IUPAC name, formula, synonyms via the PubChem MCP server (`get_compound_details`, no LLM)
+    3. only if 1 finds nothing: the agent (agents.yaml `mcp: [pubchem]`, skill pubchem-scrape) names the
+       fragment and uses the MCP name search. No response_format there (constrained decoding can block
+       tool calls on vLLM); the agent ends with a JSON block validated against PubChemFindings.
+
+    Params: max_fragments (3), agent_fallback (true).
     """
 
     executor_type = "pubchem_mcp"
     description = (
-        "Identify SMILES fragments in PubChem through the PubChem MCP server (an LLM picks search names, "
-        "calls the MCP tools, verifies by formula). Needs fragments from cif_to_smiles. "
-        "Output: compounds with CID, name, formula, molecular weight, synonyms."
+        "Identify SMILES fragments in PubChem: exact SMILES structure match -> CID, details from the PubChem MCP "
+        "server; fragments without a match are named by an LLM and searched via MCP. Needs fragments from "
+        "cif_to_smiles. Output: compounds with CID, name, formula, molecular weight, synonyms."
     )
+    client = pubchem_tools._client  # SMILES -> CID (PubChem REST); swap in tests
 
     def __init__(self, id: str, agent: Agent, model: str | None = None, **params: Any) -> None:
         super().__init__(id, **params)
@@ -186,13 +193,98 @@ class PubChemMCPExecutor(BaseToolExecutor):
             raise ValueError(f"formatting retry returned no JSON: {response.text[:200]!r}")
         return response.value.model_dump()
 
+    # ------------------------------------------------------------ 1) SMILES -> CID (structure match)
+    async def smiles_to_cid(self, query: dict[str, str]) -> tuple[pubchem_tools.PubChemResult, str] | None:
+        """Exact structure lookup in PubChem (the MCP server has no SMILES search). Order:
+        1. bond-order SMILES (aromatic rings, nitriles ... exact for any molecule)
+        2. converter SMILES without H (PubChem fills implicit H: exact for saturated molecules,
+           e.g. C(CC1CCNCC1)CC1CCNCC1 -> CID 85631)
+        3. converter SMILES as is"""
+        candidates = [query.get("bonded_smiles"), query["smiles_without_h"], query["query_smiles"]]
+        for smiles in dict.fromkeys(s for s in candidates if s):
+            res = await self.client.lookup(smiles, include_synonyms=True, max_synonyms=5)
+            if res.found:
+                return res, smiles
+        return None
+
+    # ------------------------------------------------------------ 2) CID -> details via PubChem MCP
+    @property
+    def mcp_tool(self) -> Any:
+        tools = getattr(self.agent, "mcp_tools", [])
+        return tools[0] if tools else None
+
+    async def mcp_details(self, cid: int) -> dict[str, Any]:
+        """`get_compound_details` on the PubChem MCP server, called directly (no LLM)."""
+        tool = self.mcp_tool
+        if tool is None:
+            raise RuntimeError("pubchem agent has no MCP tool (agents.yaml: mcp: [pubchem])")
+        if not getattr(tool, "is_connected", False):
+            await tool.connect()
+        contents = await tool.call_tool("get_compound_details", cid=cid)
+        data = json.loads(" ".join(getattr(c, "text", "") or "" for c in contents) or "{}")
+        data = data.get("result", data)
+        if "error" in data:
+            raise RuntimeError(f"MCP get_compound_details({cid}): {data.get('error')} {data.get('message', '')}")
+        return data
+
+    async def describe(self, query: dict[str, str], res: pubchem_tools.PubChemResult, matched: str) -> CompoundHit:
+        c = res.compound
+        hit = CompoundHit(
+            query_smiles=query["query_smiles"], found=True, cid=c.cid, iupac_name=c.iupac_name,
+            formula=c.molecular_formula, molecular_weight=c.molecular_weight, synonyms=res.synonyms,
+            name=(res.synonyms[0] if res.synonyms else c.iupac_name), searched_as=f"smiles:{matched}",
+        )
+        try:  # prefer the MCP server's view for name/properties
+            d = await self.mcp_details(c.cid)
+            props, syns = d.get("properties") or {}, d.get("synonyms") or []
+            hit.synonyms = syns[:5] or hit.synonyms
+            hit.name = (syns[0] if syns else None) or hit.name
+            hit.iupac_name = props.get("IUPACName") or hit.iupac_name
+            hit.formula = props.get("MolecularFormula") or hit.formula
+            if props.get("MolecularWeight"):
+                hit.molecular_weight = float(props["MolecularWeight"])
+            hit.note = "matched by SMILES; details from PubChem MCP"
+        except Exception as exc:  # MCP unavailable: keep the REST data
+            hit.note = f"matched by SMILES; MCP details unavailable ({str(exc)[:80]})"
+        return hit
+
+    # ------------------------------------------------------------ 3) fallback: LLM + MCP name search
     async def run_tool(self, item: WorkItem) -> dict[str, Any]:
         fragments = item.find("fragments") or ([s] if (s := item.find("smiles")) else [])
         if not fragments:
             raise ValueError("no SMILES from an earlier tool (plan cif_to_smiles before pubchem)")
         heavy = item.find("heavy_fragments") or fragments
+        bonded = item.find("bonded_fragments") or [None] * len(fragments)
         limit = int(self.params.get("max_fragments", 3))
-        queries = [{"query_smiles": f, "smiles_without_h": h} for f, h in zip(fragments, heavy)][:limit]
+        queries = [
+            {"query_smiles": f, "smiles_without_h": h, **({"bonded_smiles": b} if b else {})}
+            for f, h, b in zip(fragments, heavy, bonded)
+        ][:limit]
+
+        hits: list[CompoundHit] = []
+        unresolved: list[dict[str, str]] = []
+        for q in queries:
+            if match := await self.smiles_to_cid(q):
+                hits.append(await self.describe(q, *match))
+            else:
+                unresolved.append(q)
+
+        parsed_by = "smiles"
+        if unresolved and self.params.get("agent_fallback", True):
+            agent_hits, parsed_by = await self.identify_by_name(item, unresolved)
+            hits += agent_hits
+        else:
+            hits += [CompoundHit(query_smiles=q["query_smiles"], found=False, note="no PubChem match for SMILES")
+                     for q in unresolved]
+        return {
+            "compounds": [h.model_dump() for h in hits],
+            "fragments_not_looked_up": max(0, len(fragments) - limit),
+            "matched_by_smiles": len(queries) - len(unresolved),
+            "parsed_by": parsed_by,
+        }
+
+    async def identify_by_name(self, item: WorkItem, queries: list[dict[str, str]]) -> tuple[list[CompoundHit], str]:
+        """Fragments with no exact SMILES match: the agent names them and uses the MCP name search."""
         prompt = (
             "Identify each fragment in PubChem with the PubChem MCP tools, following the pubchem-scrape skill.\n\n"
             f"SUBSYSTEM: {item.system} (label: {item.metadata.get('label')}, "
@@ -202,15 +294,11 @@ class PubChemMCPExecutor(BaseToolExecutor):
         )
         text = await self.ask_agent(prompt)
         try:
-            findings, parsed_by = normalize_findings(extract_json(text), queries), "answer"
+            findings, parsed_by = normalize_findings(extract_json(text), queries), "agent"
         except (ValueError, TypeError) as exc:  # incl. pydantic ValidationError
             log.warning("pubchem agent answer not usable (%s); asking it to reformat", str(exc)[:120])
-            findings, parsed_by = normalize_findings(await self.format_answer(text, queries), queries), "reformat"
-        return {
-            "compounds": [c.model_dump() for c in findings.compounds],
-            "fragments_not_looked_up": max(0, len(fragments) - limit),
-            "parsed_by": parsed_by,
-        }
+            findings, parsed_by = normalize_findings(await self.format_answer(text, queries), queries), "agent_reformat"
+        return findings.compounds, parsed_by
 
 
 # ---------------------------------------------------------------- PUG-View extras (not in the MCP server)

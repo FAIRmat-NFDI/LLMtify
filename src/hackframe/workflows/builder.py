@@ -51,7 +51,7 @@ class WorkflowFactory:
 
         if spec.output and spec.output not in steps:
             raise ValueError(f"workflow '{name}': output step '{spec.output}' not in steps")
-        finalize = FinalizeExecutor(output_step=spec.output)
+        finalize = FinalizeExecutor(output_step=spec.output, output_field=spec.output_field)
         ordered = [steps[s.id] for s in spec.steps]
 
         if entries:  # entry step replaces intake and receives the workflow input itself

@@ -14,6 +14,7 @@ workflows.yaml:
 import logging
 from typing import Any
 
+from hackframe.core.material import cif_key
 from hackframe.core.schemas import StepMessage
 from hackframe.executors.base import EXECUTORS, BaseStepExecutor
 
@@ -33,7 +34,7 @@ class CompactExecutor(BaseStepExecutor):
             "artifact_id": message.artifact_id,
             **data,
             "cif_keys": sorted(cifs),
-            "system_cif": {s: f"{s}.cif" for s in systems if f"{s}.cif" in cifs},
+            "system_cif": {s: k for s in systems if (k := cif_key(s, cifs))},
         }
         log.info("[%s] %d systems, %d cifs stripped (resolve via artifacts.get_cif)", self.id, len(systems), len(cifs))
         return small

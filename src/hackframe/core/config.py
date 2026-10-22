@@ -110,6 +110,7 @@ class WorkflowSpec(BaseModel):
     edges: list[EdgeSpec] = Field(default_factory=list)  # graph only
     exit: str | None = None  # graph only
     output: str | None = None  # step id whose output is the workflow result (default: full report)
+    output_field: str | None = None  # with `output`: return only this field of it (e.g. a markdown report)
     router: str | None = None  # router only: step id of the router (agentic switch)
     tools: list[str] = Field(default_factory=list)  # router only: tool step ids the router may use
     gather: str = "scrape"  # router only: id of the auto-inserted gather step (its output key)

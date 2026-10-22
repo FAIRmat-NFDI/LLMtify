@@ -13,6 +13,7 @@ dependencies = [
     "mcp>=1.20,<2",  # PubChem-MCP uses FastMCP (removed in mcp 2.x)
     "python-dotenv>=1.0",
     "httpx>=0.27",
+    "requests>=2.31",  # NOMAD client
     "ase>=3.23",
     "rdkit>=2024.3",
     # BioContext PubChem MCP server (not on PyPI); pinned to the tested commit
